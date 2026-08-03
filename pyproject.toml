@@ -1,0 +1,245 @@
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ragzen"
+version = "0.1.0"
+description = "Enterprise-grade, local-first RAG for Python"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+    { name = "RagZen Contributors" },
+]
+keywords = [
+    "rag",
+    "retrieval-augmented-generation",
+    "enterprise",
+    "multi-tenant",
+    "local-first",
+    "llm",
+    "search",
+    "embeddings",
+    "vector-store",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "pydantic>=2.5.0,<3.0.0",
+    "pydantic-settings>=2.1.0,<3.0.0",
+    "httpx>=0.25.0,<1.0.0",
+    "PyYAML>=6.0.1,<7.0.0",
+    "tenacity>=8.2.0,<10.0.0",
+    "xxhash>=3.4.0,<4.0.0",
+]
+
+[project.optional-dependencies]
+local = [
+    "sentence-transformers>=2.2.0,<4.0.0",
+    "numpy>=1.24.0,<3.0.0",
+]
+documents = [
+    "pypdf>=3.15.0,<6.0.0",
+    "python-docx>=1.0.0,<2.0.0",
+    "openpyxl>=3.1.0,<4.0.0",
+    "beautifulsoup4>=4.12.0,<5.0.0",
+    "lxml>=4.9.0,<6.0.0",
+    "chardet>=5.0.0,<6.0.0",
+]
+qdrant = [
+    "qdrant-client>=1.7.0,<3.0.0",
+]
+pgvector = [
+    "psycopg[binary]>=3.1.0,<4.0.0",
+    "pgvector>=0.2.0,<1.0.0",
+]
+ollama = [
+    "httpx>=0.25.0,<1.0.0",
+]
+openai = [
+    "httpx>=0.25.0,<1.0.0",
+]
+redis = [
+    "redis>=5.0.0,<6.0.0",
+]
+server = [
+    "fastapi>=0.104.0,<1.0.0",
+    "uvicorn[standard]>=0.24.0,<1.0.0",
+    "python-multipart>=0.0.6,<1.0.0",
+]
+observability = [
+    "opentelemetry-api>=1.20.0,<2.0.0",
+    "opentelemetry-sdk>=1.20.0,<2.0.0",
+    "prometheus-client>=0.19.0,<1.0.0",
+    "structlog>=23.2.0,<25.0.0",
+]
+dev = [
+    "pytest>=7.4.0,<9.0.0",
+    "pytest-asyncio>=0.23.0,<1.0.0",
+    "pytest-cov>=4.1.0,<6.0.0",
+    "pytest-timeout>=2.2.0,<3.0.0",
+    "pytest-benchmark>=4.0.0,<5.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0,<2.0.0",
+    "bandit>=1.7.0,<2.0.0",
+    "pip-audit>=2.6.0,<3.0.0",
+    "build>=1.0.0,<2.0.0",
+    "twine>=4.0.0,<6.0.0",
+    "types-PyYAML>=6.0.0",
+    "types-redis>=4.6.0",
+]
+all = [
+    "ragzen[local,documents,qdrant,ollama,openai,redis,server,observability]",
+]
+
+[project.scripts]
+ragzen = "ragzen.cli.main:app"
+
+[project.entry-points."ragzen.plugins"]
+
+[project.urls]
+Homepage = "https://github.com/ThoCanh/RagZen-RBTSOL"
+Documentation = "https://github.com/ThoCanh/RagZen-RBTSOL#readme"
+Repository = "https://github.com/ThoCanh/RagZen-RBTSOL"
+Issues = "https://github.com/ThoCanh/RagZen-RBTSOL/issues"
+Changelog = "https://github.com/ThoCanh/RagZen-RBTSOL/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.sdist]
+include = ["/src/ragzen"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ragzen"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "S",     # flake8-bandit
+    "A",     # flake8-builtins
+    "C4",    # flake8-comprehensions
+    "DTZ",   # flake8-datetimez
+    "T20",   # flake8-print
+    "SIM",   # flake8-simplify
+    "TCH",   # flake8-type-checking
+    "RUF",   # ruff-specific
+    "PT",    # flake8-pytest-style
+    "PIE",   # flake8-pie
+    "PLC",   # pylint convention
+    "PLE",   # pylint error
+    "PLW",   # pylint warning
+]
+ignore = [
+    "S101",   # assert used (ok in tests)
+    "S603",   # subprocess without shell (we never use shell=True)
+    "S607",   # partial path subprocess
+    "TCH001", # move import into type-checking block (we use at runtime)
+    "TC001",  # move import into type-checking block (we use at runtime)
+    "TC003",  # move stdlib import into type-checking block (we use at runtime)
+    "PLC0415",# top-level import (used for optional extra dependencies)
+    "RUF012", # mutable class var (we use ClassVar-style constants)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S106", "T20"]
+"src/ragzen/cli/**/*.py" = ["T201"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ragzen"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+strict_equality = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "sentence_transformers.*",
+    "qdrant_client.*",
+    "pypdf.*",
+    "docx.*",
+    "openpyxl.*",
+    "bs4.*",
+    "lxml.*",
+    "chardet.*",
+    "redis.*",
+    "prometheus_client.*",
+    "structlog.*",
+    "opentelemetry.*",
+    "celery.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: Unit tests (fast, no external deps)",
+    "integration: Integration tests (may need services)",
+    "security: Security tests",
+    "performance: Performance/benchmark tests",
+    "chaos: Chaos/fault tolerance tests",
+    "slow: Slow tests",
+    "contract: Contract tests for provider adapters",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+addopts = "-v --tb=short --strict-markers"
+
+[tool.coverage.run]
+source = ["ragzen"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/cli/*",
+    "*/server/*",
+]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
+    "raise NotImplementedError",
+    "pass",
+    "@abstractmethod",
+    "\\.\\.\\.",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = ["B101"]
