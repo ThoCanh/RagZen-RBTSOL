@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from typing import Protocol, runtime_checkable
 
 
@@ -34,3 +35,12 @@ class LLMProvider(Protocol):
         ...
 
     def health_check(self) -> bool: ...
+
+    def astream_generate(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str = "",
+        temperature: float = 0.1,
+        max_tokens: int = 2048,
+    ) -> AsyncGenerator[str, None]: ...

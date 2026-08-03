@@ -19,6 +19,7 @@ class SentenceTransformerEmbeddingProvider:
         """Check if sentence-transformers package is installed."""
         try:
             import sentence_transformers  # noqa: F401
+
             return True
         except ImportError:
             return False
@@ -30,13 +31,17 @@ class SentenceTransformerEmbeddingProvider:
     def _load_model(self) -> Any:
         if self._model is None:
             try:
-                from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+                from sentence_transformers import (
+                    SentenceTransformer,
+                )
+
                 logger.info("Loading SentenceTransformer model: %s", self._model_name)
                 self._model = SentenceTransformer(self._model_name)
             except ImportError as err:
                 msg = (
                     "package 'sentence-transformers' is not installed. "
-                    "Install it via: pip install 'ragzen[embeddings]' or pip install sentence-transformers"
+                    "Install it via: pip install 'ragzen[local]' "
+                    "or pip install sentence-transformers"
                 )
                 raise ImportError(msg) from err
         return self._model
@@ -55,7 +60,8 @@ class SentenceTransformerEmbeddingProvider:
             return []
         model = self._load_model()
         embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-        return embeddings.tolist()
+        values = embeddings.tolist()
+        return [[float(value) for value in row] for row in values]
 
     def embed_query(self, text: str) -> list[float]:
         if not text.strip():

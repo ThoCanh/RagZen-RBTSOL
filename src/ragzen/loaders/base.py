@@ -22,17 +22,19 @@ logger = logging.getLogger("ragzen.loaders")
 
 # Default limits
 DEFAULT_MAX_FILE_SIZE_MB = 100.0
-DEFAULT_ALLOWED_MIME_TYPES = frozenset({
-    "text/plain",
-    "text/markdown",
-    "text/html",
-    "text/csv",
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/json",
-    "message/rfc822",
-})
+DEFAULT_ALLOWED_MIME_TYPES = frozenset(
+    {
+        "text/plain",
+        "text/markdown",
+        "text/html",
+        "text/csv",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/json",
+        "message/rfc822",
+    }
+)
 
 
 @runtime_checkable
@@ -98,8 +100,7 @@ def validate_file(
     # Check allowlist
     if allowed_mime_types and mime_type not in allowed_mime_types:
         msg = (
-            f"Unsupported file type: {mime_type} for {path}. "
-            f"Allowed: {sorted(allowed_mime_types)}"
+            f"Unsupported file type: {mime_type} for {path}. Allowed: {sorted(allowed_mime_types)}"
         )
         raise UnsupportedFileTypeError(msg)
 

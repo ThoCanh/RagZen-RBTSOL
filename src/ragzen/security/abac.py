@@ -78,9 +78,10 @@ class ABACPolicy:
 
         # Department check
         if resource_access_control.departments:
-            has_dept = bool(
-                set(security_context.departments) & set(resource_access_control.departments)
-            ) or "all" in security_context.departments
+            has_dept = (
+                bool(set(security_context.departments) & set(resource_access_control.departments))
+                or "all" in security_context.departments
+            )
             if not has_dept:
                 return False
 

@@ -39,7 +39,8 @@ def run_benchmark() -> None:
         for i in range(num_docs):
             p = docs_dir / f"doc_{i:03d}.txt"
             p.write_text(
-                f"Tài liệu kỹ thuật số {i}: Quy trình bảo trì hệ thống và giám sát hiệu năng enterprise.",
+                f"Tài liệu kỹ thuật số {i}: Quy trình bảo trì hệ thống "
+                "và giám sát hiệu năng enterprise.",
                 encoding="utf-8",
             )
 
@@ -49,7 +50,8 @@ def run_benchmark() -> None:
         throughput = num_docs / ingest_time if ingest_time > 0 else 0
 
         print(
-            f"[Ingestion] Processed {job.processed_documents} docs in {ingest_time:.3f}s ({throughput:.1f} docs/sec)"
+            f"[Ingestion] Processed {job.processed_documents} docs in "
+            f"{ingest_time:.3f}s ({throughput:.1f} docs/sec)"
         )
 
         # 2. Real Hybrid Search Latency Benchmark (BM25 + Vector RRF)

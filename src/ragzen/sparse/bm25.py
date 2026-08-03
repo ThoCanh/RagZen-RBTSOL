@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import re
+import threading
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -43,16 +44,24 @@ class BM25Index:
         k1: float = 1.5,
         b: float = 0.75,
         tokenizer: Any = None,
+        path: str | Path | None = None,
     ) -> None:
         self._k1 = k1
         self._b = b
         self._tokenize = tokenizer or _default_tokenize
+        raw_path = Path(path) if path else None
+        self._path = (
+            raw_path / "index.json" if raw_path is not None and not raw_path.suffix else raw_path
+        )
+        self._lock = threading.RLock()
 
         # Document data
         self._docs: dict[str, dict[str, Any]] = {}  # chunk_id -> metadata
         self._doc_tokens: dict[str, list[str]] = {}  # chunk_id -> tokens
         self._doc_freqs: dict[str, int] = {}  # term -> doc count
         self._avg_dl: float = 0.0
+        if self._path and self._path.exists():
+            self.load(self._path)
 
     def add(
         self,
@@ -61,24 +70,33 @@ class BM25Index:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Add a document to the index."""
-        tokens = self._tokenize(content)
-        self._doc_tokens[chunk_id] = tokens
-        self._docs[chunk_id] = metadata or {}
+        with self._lock:
+            if chunk_id in self._doc_tokens:
+                self._remove_in_memory(chunk_id)
+            tokens = self._tokenize(content)
+            self._doc_tokens[chunk_id] = tokens
+            self._docs[chunk_id] = metadata or {}
 
-        # Update document frequencies
-        unique_terms = set(tokens)
-        for term in unique_terms:
-            self._doc_freqs[term] = self._doc_freqs.get(term, 0) + 1
+            # Update document frequencies
+            unique_terms = set(tokens)
+            for term in unique_terms:
+                self._doc_freqs[term] = self._doc_freqs.get(term, 0) + 1
 
-        # Update average document length
-        total_tokens = sum(len(t) for t in self._doc_tokens.values())
-        self._avg_dl = total_tokens / len(self._doc_tokens) if self._doc_tokens else 0
+            # Update average document length
+            self._recalculate_average_length()
+            self._persist()
 
     def remove(self, chunk_id: str) -> bool:
         """Remove a document chunk from the index."""
-        if chunk_id not in self._doc_tokens:
-            return False
+        with self._lock:
+            if chunk_id not in self._doc_tokens:
+                return False
+            self._remove_in_memory(chunk_id)
+            self._recalculate_average_length()
+            self._persist()
+            return True
 
+    def _remove_in_memory(self, chunk_id: str) -> None:
         tokens = self._doc_tokens[chunk_id]
         unique_terms = set(tokens)
         for term in unique_terms:
@@ -90,22 +108,24 @@ class BM25Index:
         del self._doc_tokens[chunk_id]
         del self._docs[chunk_id]
 
+    def _recalculate_average_length(self) -> None:
         total_tokens = sum(len(t) for t in self._doc_tokens.values())
         self._avg_dl = total_tokens / len(self._doc_tokens) if self._doc_tokens else 0
-        return True
 
     def remove_by_document_id(self, document_id: str) -> int:
         """Remove all chunks belonging to a document_id.
 
         Returns number of removed chunks.
         """
-        to_remove = [
-            cid for cid, meta in self._docs.items()
-            if meta.get("document_id") == document_id
-        ]
-        for cid in to_remove:
-            self.remove(cid)
-        return len(to_remove)
+        with self._lock:
+            to_remove = [
+                cid for cid, meta in self._docs.items() if meta.get("document_id") == document_id
+            ]
+            for cid in to_remove:
+                self._remove_in_memory(cid)
+            self._recalculate_average_length()
+            self._persist()
+            return len(to_remove)
 
     def search(
         self,
@@ -134,9 +154,13 @@ class BM25Index:
 
         scores: list[tuple[str, float, dict[str, Any]]] = []
 
-        for chunk_id, doc_tokens in self._doc_tokens.items():
+        with self._lock:
+            items = list(self._doc_tokens.items())
+            docs = dict(self._docs)
+            n = len(items)
+        for chunk_id, doc_tokens in items:
             # Apply filters FIRST
-            metadata = self._docs.get(chunk_id, {})
+            metadata = docs.get(chunk_id, {})
             if filters and not self._matches_filters(metadata, filters):
                 continue
 
@@ -147,9 +171,7 @@ class BM25Index:
         scores.sort(key=lambda x: x[1], reverse=True)
         return scores[:top_k]
 
-    def _compute_bm25(
-        self, query_tokens: list[str], doc_tokens: list[str], n: int
-    ) -> float:
+    def _compute_bm25(self, query_tokens: list[str], doc_tokens: list[str], n: int) -> float:
         """Compute BM25 score for a document."""
         doc_len = len(doc_tokens)
         tf = Counter(doc_tokens)
@@ -173,7 +195,8 @@ class BM25Index:
 
     def count(self) -> int:
         """Return number of indexed documents."""
-        return len(self._doc_tokens)
+        with self._lock:
+            return len(self._doc_tokens)
 
     def save(self, path: str | Path) -> None:
         """Save index to disk."""
@@ -187,57 +210,53 @@ class BM25Index:
             "k1": self._k1,
             "b": self._b,
         }
-        save_path.write_text(json.dumps(data), encoding="utf-8")
+        temp_path = save_path.with_suffix(save_path.suffix + ".tmp")
+        temp_path.write_text(json.dumps(data), encoding="utf-8")
+        temp_path.replace(save_path)
+
+    def _persist(self) -> None:
+        if self._path:
+            self.save(self._path)
 
     def load(self, path: str | Path) -> None:
         """Load index from disk."""
         load_path = Path(path)
         if not load_path.exists():
             return
-        data = json.loads(load_path.read_text(encoding="utf-8"))
-        self._docs = data["docs"]
-        self._doc_tokens = data["doc_tokens"]
-        self._doc_freqs = data["doc_freqs"]
-        self._avg_dl = data["avg_dl"]
+        with self._lock:
+            data = json.loads(load_path.read_text(encoding="utf-8"))
+            self._docs = data["docs"]
+            self._doc_tokens = data["doc_tokens"]
+            self._doc_freqs = data["doc_freqs"]
+            self._avg_dl = data["avg_dl"]
 
-    def clear(self) -> None:
+    def clear(self, *, filters: dict[str, Any] | None = None) -> None:
         """Clear the index."""
-        self._docs.clear()
-        self._doc_tokens.clear()
-        self._doc_freqs.clear()
-        self._avg_dl = 0.0
+        with self._lock:
+            if filters:
+                to_remove = [
+                    chunk_id
+                    for chunk_id, metadata in self._docs.items()
+                    if self._matches_filters(metadata, filters)
+                ]
+                for chunk_id in to_remove:
+                    self._remove_in_memory(chunk_id)
+                self._recalculate_average_length()
+            else:
+                self._docs.clear()
+                self._doc_tokens.clear()
+                self._doc_freqs.clear()
+                self._avg_dl = 0.0
+            self._persist()
+
+    def close(self) -> None:
+        """Persist the index before shutdown."""
+        with self._lock:
+            self._persist()
 
     @staticmethod
-    def _matches_filters(
-        metadata: dict[str, Any], filters: dict[str, Any]
-    ) -> bool:
+    def _matches_filters(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
         """Check if metadata matches all filter criteria."""
-        for key, expected in filters.items():
-            if key == "_security_roles":
-                doc_roles = metadata.get("roles", [])
-                has_role = set(expected) & set(doc_roles) or "*" in expected or "admin" in expected
-                if doc_roles and isinstance(expected, list) and not has_role:
-                    return False
-                continue
+        from ragzen.security.filters import metadata_matches_filters
 
-            if key == "_security_groups":
-                doc_groups = metadata.get("groups", [])
-                has_group = set(expected) & set(doc_groups)
-                if doc_groups and isinstance(expected, list) and not has_group:
-                    return False
-                continue
-
-            actual = metadata.get(key)
-            if actual is None:
-                return False
-
-            if isinstance(expected, list):
-                if isinstance(actual, list):
-                    if not set(expected) & set(actual):
-                        return False
-                elif actual not in expected:
-                    return False
-            elif actual != expected:
-                return False
-
-        return True
+        return metadata_matches_filters(metadata, filters)

@@ -27,7 +27,8 @@ def test_server_endpoints(tmp_path: object) -> None:
     # Metrics
     resp = client.get("/metrics")
     assert resp.status_code == 200
-    assert "document_count" in resp.json()
+    assert "ragzen_document_count" in resp.text
+    assert resp.headers["content-type"].startswith("text/plain")
 
     # Ingest text
     resp = client.post(

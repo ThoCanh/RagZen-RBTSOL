@@ -115,7 +115,7 @@ def check_access_control(
     if access_control.roles:
         has_role = any(role in security_context.roles for role in access_control.roles)
         if not has_role and fail_closed:
-                return False
+            return False
 
     # Check group access
     if access_control.groups:
@@ -131,4 +131,7 @@ def check_access_control(
         if not has_permission:
             return False
 
-    return True
+    return not access_control.attributes or not any(
+        security_context.attributes.get(key) != value
+        for key, value in access_control.attributes.items()
+    )

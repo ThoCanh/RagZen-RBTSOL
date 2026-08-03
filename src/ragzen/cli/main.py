@@ -100,11 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "config" and args.action == "validate":
-        cfg = (
-            RagZenConfig.from_yaml(args.config)
-            if args.config
-            else RagZenConfig.local_default()
-        )
+        cfg = RagZenConfig.from_yaml(args.config) if args.config else RagZenConfig.local_default()
         warnings = validate_config(cfg)
         if warnings:
             print("Configuration Warnings:")
@@ -158,7 +154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "health" or args.command == "doctor":
-        health = engine.health()
+        health = engine.health(deep=args.command == "doctor")
         print(json.dumps(health.model_dump(mode="json"), indent=2))
         return 0 if health.healthy else 1
 

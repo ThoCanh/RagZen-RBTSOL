@@ -1,0 +1,39 @@
+environment: production
+
+storage:
+  path: /app/.ragzen/documents.db
+
+embedding:
+  provider: local
+  dimensions: 384
+
+vector_store:
+  provider: qdrant
+  url: http://qdrant:6333
+  collection: documents
+
+sparse_index:
+  provider: bm25
+  path: /app/.ragzen/bm25.json
+
+graph:
+  enabled: true
+  path: /app/.ragzen/graph.json
+
+retrieval:
+  mode: hybrid_graph
+
+llm:
+  provider: extractive
+
+security:
+  require_security_context: true
+  fail_closed: true
+
+server:
+  allowed_ingest_roots: [/app/imports]
+  principals:
+    - api_key: ${RAGZEN_API_KEY}
+      tenant_id: default
+      user_id: docker-service
+      roles: [admin, reader, writer]

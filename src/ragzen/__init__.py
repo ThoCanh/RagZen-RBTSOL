@@ -12,6 +12,7 @@ Public API:
 from __future__ import annotations
 
 from ragzen.engine import RagZen
+from ragzen.evaluation import RetrievalEvaluation, evaluate_retrieval
 from ragzen.exceptions import (
     ConfigurationError,
     MissingOptionalDependencyError,
@@ -27,6 +28,7 @@ from ragzen.models import (
     Chunk,
     Citation,
     Document,
+    DocumentVersion,
     HealthStatus,
     IngestionJob,
     QueryMetrics,
@@ -36,7 +38,7 @@ from ragzen.models import (
     SecurityContext,
 )
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 __all__ = [
     "AccessControl",
@@ -45,6 +47,7 @@ __all__ = [
     "Citation",
     "ConfigurationError",
     "Document",
+    "DocumentVersion",
     "HealthStatus",
     "IngestionJob",
     "MissingOptionalDependencyError",
@@ -54,10 +57,12 @@ __all__ = [
     "RagResponse",
     "RagZen",
     "RagZenError",
+    "RetrievalEvaluation",
     "SearchResult",
     "SecurityContext",
     "SecurityContextRequiredError",
     "SecurityError",
     "TenantIsolationError",
     "__version__",
+    "evaluate_retrieval",
 ]

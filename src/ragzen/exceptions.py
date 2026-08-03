@@ -211,6 +211,6 @@ class MissingOptionalDependencyError(RagZenError):
         feature_msg = f" for {feature}" if feature else ""
         message = (
             f"'{package}' is required{feature_msg} but not installed.\n"
-            f"Install with: pip install \"ragzen[{extra}]\""
+            f'Install with: pip install "ragzen[{extra}]"'
         )
         super().__init__(message)

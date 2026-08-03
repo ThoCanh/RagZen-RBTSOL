@@ -104,7 +104,7 @@ class TestMandatoryFilters:
         ctx = SecurityContext(tenant_id="t1", departments=["eng"])
         filters = build_mandatory_filters(ctx)
         assert filters["tenant_id"] == "t1"
-        assert "departments" in filters
+        assert "_security_departments" in filters
 
     def test_no_context_required_deny_all(self) -> None:
         filters = build_mandatory_filters(None, require_context=True)

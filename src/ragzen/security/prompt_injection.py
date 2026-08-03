@@ -108,8 +108,7 @@ class PromptInjectionDetector:
             self._patterns.extend(custom_patterns)
         # Pre-compile patterns
         self._compiled: list[tuple[re.Pattern[str], float, str]] = [
-            (re.compile(pattern), conf, desc)
-            for pattern, conf, desc in self._patterns
+            (re.compile(pattern), conf, desc) for pattern, conf, desc in self._patterns
         ]
 
     def check(self, text: str) -> InjectionCheckResult:

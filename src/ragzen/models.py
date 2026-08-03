@@ -7,6 +7,7 @@ stored data are frozen (immutable) to prevent accidental mutation.
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -83,6 +84,7 @@ class AccessControl(BaseModel):
     roles: list[str] = Field(default_factory=list)
     groups: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
     access_level: AccessLevel = AccessLevel.INTERNAL
 
     @field_validator("tenant_id")
@@ -152,6 +154,9 @@ class DocumentVersion(BaseModel):
     document_id: str
     version: int
     content_hash: str
+    tenant_id: str = ""
+    content: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
     created_by: str = ""
     change_reason: str = ""
@@ -341,6 +346,7 @@ class SecurityContext(BaseModel):
             f"d:{','.join(sorted(self.departments))}",
             f"g:{','.join(sorted(self.groups))}",
             f"p:{','.join(sorted(self.permissions))}",
+            f"a:{json.dumps(self.attributes, sort_keys=True, default=str)}",
         ]
         raw = "|".join(parts)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

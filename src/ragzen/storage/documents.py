@@ -16,11 +16,17 @@ from pathlib import Path
 from typing import Any
 
 from ragzen.exceptions import StorageError, TransactionError
-from ragzen.models import AccessControl, Document, DocumentStatus, RetentionPolicy
+from ragzen.models import (
+    AccessControl,
+    Document,
+    DocumentStatus,
+    DocumentVersion,
+    RetentionPolicy,
+)
 
 logger = logging.getLogger("ragzen.storage.documents")
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 3
 
 _CREATE_TABLES = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -33,6 +39,7 @@ CREATE TABLE IF NOT EXISTS documents (
     document_id TEXT PRIMARY KEY,
     version INTEGER NOT NULL DEFAULT 1,
     tenant_id TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
     content_hash TEXT NOT NULL DEFAULT '',
     metadata TEXT NOT NULL DEFAULT '{}',
     source TEXT NOT NULL DEFAULT '',
@@ -61,6 +68,19 @@ CREATE INDEX IF NOT EXISTS idx_documents_idempotency
     WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_documents_type
     ON documents(tenant_id, document_type);
+
+CREATE TABLE IF NOT EXISTS document_versions (
+    version_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    tenant_id TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_versions_unique
+    ON document_versions(document_id, version);
 """
 
 
@@ -94,6 +114,21 @@ class DocumentRegistry:
         """Create tables if they don't exist."""
         try:
             self._conn.executescript(_CREATE_TABLES)
+            columns = {
+                row[1] for row in self._conn.execute("PRAGMA table_info(documents)").fetchall()
+            }
+            if "content" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE documents ADD COLUMN content TEXT NOT NULL DEFAULT ''"
+                )
+            version_columns = {
+                row[1]
+                for row in self._conn.execute("PRAGMA table_info(document_versions)").fetchall()
+            }
+            if "content" not in version_columns:
+                self._conn.execute(
+                    "ALTER TABLE document_versions ADD COLUMN content TEXT NOT NULL DEFAULT ''"
+                )
             # Check if schema version exists
             cur = self._conn.execute(
                 "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
@@ -130,29 +165,47 @@ class DocumentRegistry:
             idempotency_key: Optional key for duplicate detection.
         """
         now = datetime.now(UTC).isoformat()
-        ac_json = (
-            document.access_control.model_dump_json()
-            if document.access_control
-            else None
-        )
-        rp_json = (
-            document.retention_policy.model_dump_json()
-            if document.retention_policy
-            else None
-        )
+        ac_json = document.access_control.model_dump_json() if document.access_control else None
+        rp_json = document.retention_policy.model_dump_json() if document.retention_policy else None
 
         with self.transaction() as cursor:
+            existing = cursor.execute(
+                "SELECT version, tenant_id, content, content_hash, metadata, created_at "
+                "FROM documents WHERE document_id = ?",
+                (document.document_id,),
+            ).fetchone()
+            if existing and int(existing["version"]) != document.version:
+                version_id = f"{document.document_id}:v{existing['version']}"
+                cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO document_versions(
+                        version_id, document_id, version, tenant_id, content,
+                        content_hash, metadata, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        version_id,
+                        document.document_id,
+                        existing["version"],
+                        existing["tenant_id"],
+                        existing["content"],
+                        existing["content_hash"],
+                        existing["metadata"],
+                        existing["created_at"],
+                    ),
+                )
             cursor.execute(
                 """
                 INSERT INTO documents (
-                    document_id, version, tenant_id, content_hash,
+                    document_id, version, tenant_id, content, content_hash,
                     metadata, source, source_uri, file_name,
                     mime_type, page_count, created_at, updated_at,
                     indexed_at, document_type, access_control,
                     retention_policy, status, idempotency_key
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(document_id) DO UPDATE SET
                     version = excluded.version,
+                    content = excluded.content,
                     content_hash = excluded.content_hash,
                     metadata = excluded.metadata,
                     source = excluded.source,
@@ -171,6 +224,7 @@ class DocumentRegistry:
                     document.document_id,
                     document.version,
                     document.tenant_id,
+                    document.content,
                     document.content_hash or document.compute_content_hash(),
                     json.dumps(document.metadata),
                     document.source,
@@ -214,9 +268,7 @@ class DocumentRegistry:
             return None
         return self._row_to_document(row)
 
-    def find_by_idempotency_key(
-        self, key: str, *, tenant_id: str = ""
-    ) -> Document | None:
+    def find_by_idempotency_key(self, key: str, *, tenant_id: str = "") -> Document | None:
         """Find a document by idempotency key."""
         if tenant_id:
             row = self._conn.execute(
@@ -231,9 +283,7 @@ class DocumentRegistry:
 
         return self._row_to_document(row) if row else None
 
-    def find_by_content_hash(
-        self, content_hash: str, tenant_id: str
-    ) -> Document | None:
+    def find_by_content_hash(self, content_hash: str, tenant_id: str) -> Document | None:
         """Find a document by content hash within a tenant."""
         row = self._conn.execute(
             "SELECT * FROM documents WHERE content_hash = ? AND tenant_id = ?",
@@ -266,6 +316,42 @@ class DocumentRegistry:
 
         rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_document(row) for row in rows]
+
+    def list_versions(self, document_id: str, *, tenant_id: str = "") -> list[DocumentVersion]:
+        """Return archived versions followed by the active document version."""
+        params: list[Any] = [document_id]
+        query = "SELECT * FROM document_versions WHERE document_id = ?"
+        if tenant_id:
+            query += " AND tenant_id = ?"
+            params.append(tenant_id)
+        query += " ORDER BY version"
+        rows = self._conn.execute(query, params).fetchall()
+        versions = [
+            DocumentVersion(
+                document_id=row["document_id"],
+                version=row["version"],
+                tenant_id=row["tenant_id"],
+                content=row["content"],
+                content_hash=row["content_hash"],
+                metadata=json.loads(row["metadata"]),
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]
+        current = self.get(document_id, tenant_id=tenant_id)
+        if current:
+            versions.append(
+                DocumentVersion(
+                    document_id=current.document_id,
+                    version=current.version,
+                    tenant_id=current.tenant_id,
+                    content=current.content,
+                    content_hash=current.content_hash,
+                    metadata=current.metadata,
+                    created_at=current.created_at,
+                )
+            )
+        return versions
 
     def update_status(
         self,
@@ -313,9 +399,7 @@ class DocumentRegistry:
         """Delete all documents, optionally scoped to a tenant. Returns count."""
         if tenant_id:
             with self.transaction() as cursor:
-                cursor.execute(
-                    "DELETE FROM documents WHERE tenant_id = ?", (tenant_id,)
-                )
+                cursor.execute("DELETE FROM documents WHERE tenant_id = ?", (tenant_id,))
                 return cursor.rowcount
         else:
             with self.transaction() as cursor:
@@ -344,6 +428,7 @@ class DocumentRegistry:
             document_id=row["document_id"],
             version=row["version"],
             tenant_id=row["tenant_id"],
+            content=row["content"],
             content_hash=row["content_hash"],
             metadata=json.loads(row["metadata"]),
             source=row["source"],

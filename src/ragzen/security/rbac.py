@@ -58,9 +58,7 @@ class RBACPolicy:
 
         # Role check
         if resource_access_control.roles:
-            has_role = bool(
-                set(security_context.roles) & set(resource_access_control.roles)
-            )
+            has_role = bool(set(security_context.roles) & set(resource_access_control.roles))
             if not has_role:
                 return not self._fail_closed
 

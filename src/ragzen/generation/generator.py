@@ -6,9 +6,11 @@ validates citations, and ensures only authorized content is used.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import uuid
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from ragzen.models import Citation, QueryMetrics, RagResponse, SearchResult
@@ -172,12 +174,14 @@ class RAGGenerator:
         max_context_chars: int = 8000,
         temperature: float = 0.1,
         max_tokens: int = 2048,
+        streaming_enabled: bool = True,
     ) -> None:
         self._llm = llm
         self._system_prompt = system_prompt
         self._max_context_chars = max_context_chars
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._streaming_enabled = streaming_enabled
 
     def generate(
         self,
@@ -204,9 +208,7 @@ class RAGGenerator:
             request_id = str(uuid.uuid4())
 
         # Build context from authorized results
-        context, used_results = build_context(
-            results, max_chars=self._max_context_chars
-        )
+        context, used_results = build_context(results, max_chars=self._max_context_chars)
 
         # Handle no results
         if not used_results:
@@ -232,13 +234,20 @@ class RAGGenerator:
             gen_ms = (time.perf_counter() - gen_start) * 1000
             warnings = []
         except Exception as err:
-            logger.warning("LLM API call failed or unavailable (%s). Synthesizing answer from retrieved context.", err)
+            logger.warning(
+                "LLM API call failed or unavailable (%s). "
+                "Synthesizing answer from retrieved context.",
+                err,
+            )
             answer = f"Retrieved Context Summary:\n\n{context}"
             gen_ms = (time.perf_counter() - gen_start) * 1000
-            warnings = [f"LLM Provider unavailable: {err}"]
+            generation_warnings = [f"LLM Provider unavailable: {err}"]
+        else:
+            generation_warnings = []
 
         # Validate citations
-        citations, warnings = validate_citations(answer, used_results)
+        citations, citation_warnings = validate_citations(answer, used_results)
+        warnings = generation_warnings + citation_warnings
 
         total_ms = (time.perf_counter() - start) * 1000
 
@@ -256,3 +265,33 @@ class RAGGenerator:
             retrieval_strategy="hybrid",
             warnings=warnings,
         )
+
+    async def stream(
+        self,
+        question: str,
+        results: list[SearchResult],
+    ) -> AsyncGenerator[str, None]:
+        """Stream generation from providers that support native async streaming."""
+        context, used_results = build_context(results, max_chars=self._max_context_chars)
+        if not used_results:
+            yield "Không có đủ thông tin trong tài liệu để trả lời câu hỏi này."
+            return
+        prompt = build_prompt(question, context)
+        stream_method = getattr(self._llm, "astream_generate", None)
+        if stream_method and self._streaming_enabled:
+            async for token in stream_method(
+                prompt,
+                system_prompt=self._system_prompt,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+            ):
+                yield token
+            return
+        answer = await asyncio.to_thread(
+            self._llm.generate,
+            prompt,
+            system_prompt=self._system_prompt,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+        )
+        yield answer

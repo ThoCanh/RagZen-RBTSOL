@@ -1,70 +1,31 @@
-# Introducing RagZen: Open Source Local-First Multi-Tenant RAG Framework for Python
+# Introducing RagZen 0.2: a local-first RAG framework for Python
 
-Building Retrieval-Augmented Generation (RAG) applications for enterprise environments requires much more than simple vector search over PDF files. In production, enterprise applications demand **strict multi-tenant security boundaries**, **granular RBAC/ABAC authorization**, **local-first privacy with zero SaaS lock-in**, and **high fault tolerance**.
+RagZen is an Apache-2.0 Python framework for permission-aware retrieval-augmented
+generation. Version 0.2 provides a durable zero-config local stack and lets production
+deployments replace individual providers.
 
-That is why we built **RagZen** — an enterprise-grade, local-first Python RAG framework available now on PyPI and GitHub.
+Highlights:
 
----
-
-## ⚡ Why RagZen?
-
-1. **Multi-Tenant Security by Default**: Tenant boundaries are enforced directly at the storage layer (`SQLite` + `VectorStore` + `BM25`). Unauthorized cross-tenant queries are blocked fail-closed before any LLM inference occurs.
-2. **Local-First Architecture**: Powered by SQLite in WAL (Write-Ahead Logging) mode, BM25 Unicode/Vietnamese lexical search, and high-speed in-memory vector storage with Reciprocal Rank Fusion (RRF).
-3. **Resilience & Circuit Breakers**: Built-in `CircuitBreaker` state machine (`CLOSED`, `OPEN`, `HALF_OPEN`) and `FallbackLLMProvider` chain for automatic failover when LLM APIs time out or fail.
-4. **Citation Validation**: Built-in verification engine maps output citations (`[Source X]`) directly to validated source metadata.
-5. **Built-in FastAPI Server & SSE Streaming**: Includes a production REST server with real-time SSE streaming (`/v1/query/stream`), Prometheus metrics (`/metrics`), and health probes (`/health/live`, `/health/ready`).
-
----
-
-## 🚀 Quickstart
+- dense, BM25, hybrid, graph, and hybrid-graph retrieval;
+- persistent SQLite vectors or Qdrant, with immutable tenant and ACL filters;
+- document deduplication, version history, rollback-safe ingestion, and backup bundles;
+- PDF, DOCX, XLSX, HTML, JSON, Markdown, CSV, and text loaders;
+- OpenAI-compatible LLMs, Ollama, or dependency-free extractive generation;
+- authenticated FastAPI deployment, real streaming, Prometheus metrics, and health probes;
+- typed public APIs and retrieval evaluation helpers.
 
 ```bash
 pip install ragzen
 ```
 
-### Python API
-
 ```python
 from ragzen import RagZen, SecurityContext
 
-# Initialize local RAG instance
-rag = RagZen.local(storage_path="./data/ragzen_db")
-
-# Ingest document restricted to tenant "finance_corp"
-rag.add_text(
-    text="Q4 Net profit increased by 14.2% based on audited accounts.",
-    metadata={"tenant_id": "finance_corp", "roles": ["auditor"]}
-)
-
-# User Security Context
-ctx = SecurityContext(
-    tenant_id="finance_corp",
-    user_id="user_101",
-    roles=["auditor"]
-)
-
-# RAG Query with Citation Tracking
-response = rag.ask("What is the Q4 net profit increase?", security_context=ctx)
-print("Answer:", response.answer)
-for c in response.citations:
-    print("Source:", c.source_id)
-
-rag.close()
+with RagZen.local("./ragzen-data") as rag:
+    rag.add_text("Refunds are available for 30 days.", metadata={"tenant_id": "acme"})
+    context = SecurityContext(tenant_id="acme", user_id="demo")
+    print(rag.ask("What is the refund period?", security_context=context).answer)
 ```
 
----
-
-## 📊 Empirical Benchmarks
-
-- **Ingestion Throughput**: **336.9 documents / second**
-- **Search Latency (P99)**: **< 8.0 milliseconds**
-- **Test Suite**: **173 / 173 test cases passed (85.04% branch coverage)**
-- **Security Audit**: **0 Vulnerabilities** detected by Bandit static analysis across 4,873 LOC.
-
----
-
-## 🔗 Links
-
-- **GitHub Repository**: [https://github.com/ThoCanh/RagZen-RBTSOL](https://github.com/ThoCanh/RagZen-RBTSOL)
-- **PyPI Package**: [https://pypi.org/project/ragzen/](https://pypi.org/project/ragzen/)
-- **License**: Apache 2.0 (Open Source)
+RagZen 0.2 is an alpha release. Pin the exact version and validate retrieval quality and
+authorization policies against your own data before production use.

@@ -74,6 +74,10 @@ class FallbackLLMProvider:
         )
 
     def health_check(self) -> bool:
-        return any(
-            getattr(p, "health_check", lambda: True)() for p in self._providers
-        )
+        return any(getattr(p, "health_check", lambda: True)() for p in self._providers)
+
+    def close(self) -> None:
+        for provider in self._providers:
+            close = getattr(provider, "close", None)
+            if close:
+                close()

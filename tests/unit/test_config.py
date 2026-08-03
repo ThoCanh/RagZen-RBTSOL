@@ -28,7 +28,7 @@ class TestRagZenConfig:
 
     def test_local_default(self, tmp_path: Path) -> None:
         config = RagZenConfig.local_default(str(tmp_path / "ragzen"))
-        assert config.vector_store.provider == "memory"
+        assert config.vector_store.provider == "sqlite"
         assert config.security.require_security_context is False
         assert config.observability.log_level == "DEBUG"
 
@@ -91,6 +91,19 @@ llm:
         assert config.environment == "production"
         assert config.llm.model == "custom-model"
 
+    def test_secret_environment_placeholder(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("RAGZEN_TEST_KEY", "resolved-secret")
+        config_file = tmp_path / "secret.yaml"
+        config_file.write_text(
+            "server:\n  principals:\n    - api_key: ${RAGZEN_TEST_KEY}\n"
+            "      tenant_id: tenant-a\n      user_id: service\n",
+            encoding="utf-8",
+        )
+        config = RagZenConfig.from_yaml(config_file)
+        assert config.server.principals[0].api_key.get_secret_value() == "resolved-secret"
+
     def test_config_is_frozen(self) -> None:
         from pydantic import ValidationError
 
@@ -103,7 +116,7 @@ class TestRetrievalConfig:
     """Tests for retrieval config validation."""
 
     def test_valid_modes(self) -> None:
-        for mode in ("dense", "sparse", "hybrid"):
+        for mode in ("dense", "sparse", "hybrid", "graph", "hybrid_graph"):
             config = RetrievalConfig(mode=mode)
             assert config.mode == mode
 
@@ -150,11 +163,6 @@ class TestValidateConfig:
 
     def test_production_warnings(self) -> None:
         config = RagZenConfig(
-            environment="production",
-            security=SecurityConfig(require_security_context=False, fail_closed=False),
-            observability=ObservabilityConfig(log_query=True, log_answer=True),
-            vector_store__provider="memory",
-        ) if False else RagZenConfig(
             environment="production",
             security=SecurityConfig(require_security_context=False, fail_closed=False),
             observability=ObservabilityConfig(log_query=True, log_answer=True),

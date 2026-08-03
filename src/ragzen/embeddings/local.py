@@ -1,6 +1,6 @@
 """Deterministic local n-gram TF-IDF feature embedding provider.
 
-Provides real, deterministic, non-mock vector embeddings using character/word n-gram 
+Provides real, deterministic, non-mock vector embeddings using character/word n-gram
 subword hashing and term frequency weighting (384 dimensions).
 Used as a fast, dependency-free local fallback when sentence-transformers is absent.
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import re
+
 import xxhash
 
 

@@ -80,9 +80,7 @@ class BasicPIIDetector:
     ]
 
     def __init__(self) -> None:
-        self._compiled = [
-            (re.compile(pattern), pii_type) for pattern, pii_type in self._PATTERNS
-        ]
+        self._compiled = [(re.compile(pattern), pii_type) for pattern, pii_type in self._PATTERNS]
 
     def detect(self, text: str) -> PIIDetectionResult:
         """Scan text for basic PII patterns.

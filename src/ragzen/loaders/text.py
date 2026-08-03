@@ -10,11 +10,13 @@ from ragzen.models import Document
 
 logger = logging.getLogger("ragzen.loaders.text")
 
-_TEXT_MIME_TYPES = frozenset({
-    "text/plain",
-    "text/markdown",
-    "text/csv",
-})
+_TEXT_MIME_TYPES = frozenset(
+    {
+        "text/plain",
+        "text/markdown",
+        "text/csv",
+    }
+)
 
 
 class TextLoader:

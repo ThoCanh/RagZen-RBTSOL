@@ -1,31 +1,16 @@
-# Post Title: [Project] RagZen – Open Source Local-First Multi-Tenant RAG Framework for Python (336 docs/sec, SQLite WAL + BM25 + Vector RRF)
+# Post template: RagZen 0.2, local-first hybrid RAG for Python
 
-Hey r/LocalLLaMA & r/Python!
+We are preparing RagZen 0.2, an Apache-2.0 Python framework for building local-first,
+multi-tenant RAG applications.
 
-We just open-sourced **RagZen**, an enterprise-grade local-first Python RAG framework built to address multi-tenant security isolation, local privacy, and high throughput without SaaS dependencies.
+The zero-config path persists documents, vectors, and BM25 locally. Deployments can
+switch to Qdrant, sentence-transformer embeddings, OpenAI-compatible APIs or Ollama.
+RagZen also includes graph-assisted retrieval, ACL/ABAC filters, document versions,
+backup bundles, streaming FastAPI endpoints, Prometheus metrics, and retrieval metrics.
 
-### 🌟 Key Highlights:
-- **Local-First & Multi-Tenant**: Tenant isolation enforced at the database (SQLite WAL) and storage level with fail-closed RBAC/ABAC policies.
-- **Hybrid Retrieval**: BM25 (Unicode & Vietnamese support) + Cosine Vector Similarity fused via Reciprocal Rank Fusion (RRF).
-- **Fault-Tolerant Resilience**: Built-in Circuit Breakers and Fallback LLM provider chains.
-- **REST & SSE Streaming**: Built-in FastAPI server with SSE streaming endpoints (`/v1/query/stream`) and Prometheus latency metrics (`/metrics`).
-- **Zero Vulnerabilities**: 0 Bandit issues across 4.8k LOC, 173 passing unit/integration tests (85.04% branch coverage).
-
-### 📦 Installation & Code Example:
-`pip install ragzen`
-
-```python
-from ragzen import RagZen, SecurityContext
-
-rag = RagZen.local(storage_path="./ragzen_db")
-rag.add_text("Refund window is 30 days.", metadata={"tenant_id": "company-a"})
-
-ctx = SecurityContext(tenant_id="company-a", user_id="user_101")
-res = rag.ask("What is the refund window?", security_context=ctx)
-print(res.answer)
+```bash
+pip install ragzen
 ```
 
-GitHub: https://github.com/ThoCanh/RagZen-RBTSOL
-PyPI: https://pypi.org/project/ragzen/
-
-We'd love to get feedback from the community!
+The release is alpha: users should pin versions and test security and retrieval policies
+with their own evaluation set. Feedback and provider contributions are welcome.

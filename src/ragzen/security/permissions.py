@@ -84,25 +84,22 @@ class DefaultAuthorizationPolicy:
 
         # 4. Department check
         if resource_access_control.departments:
-            has_dept = bool(
-                set(security_context.departments) & set(resource_access_control.departments)
-            ) or "all" in security_context.departments
+            has_dept = (
+                bool(set(security_context.departments) & set(resource_access_control.departments))
+                or "all" in security_context.departments
+            )
             if not has_dept:
                 return False
 
         # 5. Role check
         if resource_access_control.roles:
-            has_role = bool(
-                set(security_context.roles) & set(resource_access_control.roles)
-            )
+            has_role = bool(set(security_context.roles) & set(resource_access_control.roles))
             if not has_role and self._fail_closed:
-                    return False
+                return False
 
         # 6. Group check
         if resource_access_control.groups:
-            has_group = bool(
-                set(security_context.groups) & set(resource_access_control.groups)
-            )
+            has_group = bool(set(security_context.groups) & set(resource_access_control.groups))
             if not has_group:
                 return False
 
@@ -114,4 +111,7 @@ class DefaultAuthorizationPolicy:
             if not has_perm:
                 return False
 
-        return True
+        return not resource_access_control.attributes or not any(
+            security_context.attributes.get(key) != value
+            for key, value in resource_access_control.attributes.items()
+        )

@@ -7,12 +7,13 @@ sparse indexing, registry persistence, deduplication, and idempotency.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ragzen.chunkers.recursive import RecursiveChunker
 from ragzen.loaders.directory import DirectoryLoader
-from ragzen.loaders.text import TextLoader
+from ragzen.loaders.documents import UniversalDocumentLoader
 from ragzen.models import (
     AccessControl,
     Document,
@@ -37,17 +38,23 @@ class IngestionPipeline:
         sparse_index: Any,
         embedding_provider: Any,
         chunker: Any = None,
+        graph_index: Any = None,
         collection: str = "documents",
+        max_file_size_mb: float = 100.0,
+        allowed_abac_keys: list[str] | None = None,
     ) -> None:
         self._registry = document_registry
         self._vector_store = vector_store
         self._sparse_index = sparse_index
         self._embedding = embedding_provider
         self._chunker = chunker or RecursiveChunker()
+        self._graph_index = graph_index
         self._collection = collection
+        self._lock = threading.RLock()
+        self._allowed_abac_keys = set(allowed_abac_keys or [])
 
-        self._text_loader = TextLoader()
-        self._dir_loader = DirectoryLoader()
+        self._document_loader = UniversalDocumentLoader(max_size_mb=max_file_size_mb)
+        self._dir_loader = DirectoryLoader(max_size_mb=max_file_size_mb)
 
     def ingest_path(
         self,
@@ -92,22 +99,34 @@ class IngestionPipeline:
         if source_path.is_dir():
             raw_docs = self._dir_loader.load(source_path)
         else:
-            raw_docs = self._text_loader.load(source_path)
+            raw_docs = self._document_loader.load(source_path)
 
-        depts = meta.get("departments", [meta.get("department")] if meta.get("department") else [])
-        roles = meta.get("roles", [meta.get("role")] if meta.get("role") else [])
-        ac = AccessControl(
-            tenant_id=tenant_id,
-            departments=depts,
-            roles=roles,
-            access_level=meta.get("access_level", "internal"),
-        )
+        ac = self._build_access_control(meta, tenant_id)
 
         processed_count = 0
         failed_count = 0
 
         for raw_doc in raw_docs:
             try:
+                document_key = (
+                    f"{idempotency_key}:{raw_doc.source_uri}"
+                    if idempotency_key and len(raw_docs) > 1
+                    else idempotency_key
+                )
+                if document_key:
+                    existing = self._registry.find_by_idempotency_key(
+                        document_key, tenant_id=tenant_id
+                    )
+                    if existing:
+                        processed_count += 1
+                        continue
+                existing_hash = self._registry.find_by_content_hash(
+                    raw_doc.content_hash or raw_doc.compute_content_hash(), tenant_id
+                )
+                if existing_hash:
+                    processed_count += 1
+                    continue
+
                 doc = Document(
                     tenant_id=tenant_id,
                     content=raw_doc.content,
@@ -120,36 +139,7 @@ class IngestionPipeline:
                     status=DocumentStatus.PROCESSING,
                 )
 
-                # Save doc to registry
-                self._registry.save(doc, idempotency_key=idempotency_key)
-
-                # Chunk doc
-                chunks = self._chunker.chunk(doc)
-
-                if chunks:
-                    chunk_texts = [c.content for c in chunks]
-                    embeddings = self._embedding.embed(chunk_texts)
-
-                    # Vector store & Sparse index upsert
-                    for chunk, emb in zip(chunks, embeddings, strict=False):
-                        chunk_meta = {
-                            "document_id": doc.document_id,
-                            "tenant_id": tenant_id,
-                            "content": chunk.content,
-                            "file_name": doc.file_name,
-                            "page": chunk.page,
-                            **doc.metadata,
-                        }
-                        if ac:
-                            chunk_meta["departments"] = ac.departments
-                            chunk_meta["roles"] = ac.roles
-
-                        self._vector_store.upsert(self._collection, chunk.chunk_id, emb, chunk_meta)
-                        self._sparse_index.add(chunk.chunk_id, chunk.content, chunk_meta)
-
-                self._registry.update_status(
-                    doc.document_id, DocumentStatus.INDEXED, tenant_id=tenant_id
-                )
+                self.ingest_document(doc, idempotency_key=document_key)
                 processed_count += 1
             except Exception as e:
                 logger.exception("Failed to ingest document %s: %s", raw_doc.file_name, e)
@@ -181,14 +171,19 @@ class IngestionPipeline:
         if security_context:
             validate_tenant_access(security_context, tenant_id)
 
-        depts = meta.get("departments", [meta.get("department")] if meta.get("department") else [])
-        roles = meta.get("roles", [meta.get("role")] if meta.get("role") else [])
-        ac = AccessControl(
-            tenant_id=tenant_id,
-            departments=depts,
-            roles=roles,
-            access_level=meta.get("access_level", "internal"),
-        )
+        with self._lock:
+            if idempotency_key:
+                existing = self._registry.find_by_idempotency_key(
+                    idempotency_key, tenant_id=tenant_id
+                )
+                if existing:
+                    return cast("Document", existing)
+            content_hash = Document(tenant_id=tenant_id, content=text).compute_content_hash()
+            existing = self._registry.find_by_content_hash(content_hash, tenant_id)
+            if existing:
+                return cast("Document", existing)
+
+        ac = self._build_access_control(meta, tenant_id)
 
         doc = Document(
             tenant_id=tenant_id,
@@ -199,27 +194,100 @@ class IngestionPipeline:
             status=DocumentStatus.PROCESSING,
         )
 
-        self._registry.save(doc, idempotency_key=idempotency_key)
-        chunks = self._chunker.chunk(doc)
+        return self.ingest_document(doc, idempotency_key=idempotency_key)
 
-        if chunks:
-            chunk_texts = [c.content for c in chunks]
-            embeddings = self._embedding.embed(chunk_texts)
+    def ingest_document(
+        self,
+        document: Document,
+        *,
+        idempotency_key: str = "",
+    ) -> Document:
+        """Persist and index a pre-constructed document with compensating rollback."""
+        with self._lock:
+            self._registry.save(document, idempotency_key=idempotency_key)
+            try:
+                chunks = self._chunker.chunk(document)
+                embeddings = self._embedding.embed([chunk.content for chunk in chunks])
+                if len(embeddings) != len(chunks):
+                    msg = (
+                        f"Embedding provider returned {len(embeddings)} vectors "
+                        f"for {len(chunks)} chunks"
+                    )
+                    raise ValueError(msg)
+                for chunk, embedding in zip(chunks, embeddings, strict=True):
+                    metadata = self._chunk_metadata(document, chunk)
+                    self._vector_store.upsert(self._collection, chunk.chunk_id, embedding, metadata)
+                    self._sparse_index.add(chunk.chunk_id, chunk.content, metadata)
+                    if self._graph_index is not None:
+                        self._graph_index.add(chunk.chunk_id, chunk.content, metadata)
+                self._registry.update_status(
+                    document.document_id,
+                    DocumentStatus.INDEXED,
+                    tenant_id=document.tenant_id,
+                )
+                return document.model_copy(update={"status": DocumentStatus.INDEXED})
+            except Exception:
+                self._vector_store.delete_by_filter(
+                    self._collection, {"document_id": document.document_id}
+                )
+                if hasattr(self._sparse_index, "remove_by_document_id"):
+                    self._sparse_index.remove_by_document_id(document.document_id)
+                if self._graph_index is not None:
+                    self._graph_index.remove_by_document_id(document.document_id)
+                self._registry.update_status(
+                    document.document_id,
+                    DocumentStatus.FAILED,
+                    tenant_id=document.tenant_id,
+                )
+                raise
 
-            for chunk, emb in zip(chunks, embeddings, strict=False):
-                chunk_meta = {
-                    "document_id": doc.document_id,
-                    "tenant_id": tenant_id,
-                    "content": chunk.content,
-                    "file_name": "raw_text",
-                    **doc.metadata,
+    def _build_access_control(self, meta: dict[str, Any], tenant_id: str) -> AccessControl:
+        departments = meta.get(
+            "departments", [meta["department"]] if meta.get("department") else []
+        )
+        roles = meta.get("roles", [meta["role"]] if meta.get("role") else [])
+        attributes = meta.get("attributes", {})
+        unknown_attributes = set(attributes) - self._allowed_abac_keys
+        if unknown_attributes:
+            msg = (
+                "Document ABAC attributes are not declared in security.abac_keys: "
+                f"{sorted(unknown_attributes)}"
+            )
+            raise ValueError(msg)
+        return AccessControl(
+            tenant_id=tenant_id,
+            owner_id=meta.get("owner_id", ""),
+            departments=departments,
+            roles=roles,
+            groups=meta.get("groups", []),
+            permissions=meta.get("permissions", []),
+            attributes=attributes,
+            access_level=meta.get("access_level", "internal"),
+        )
+
+    @staticmethod
+    def _chunk_metadata(document: Document, chunk: Any) -> dict[str, Any]:
+        metadata = {
+            **document.metadata,
+            "document_id": document.document_id,
+            "document_version": document.version,
+            "tenant_id": document.tenant_id,
+            "content": chunk.content,
+            "file_name": document.file_name or "raw_text",
+            "source_uri": document.source_uri,
+            "page": chunk.page,
+        }
+        access = document.access_control
+        if access:
+            metadata.update(
+                {
+                    "owner_id": access.owner_id,
+                    "departments": access.departments,
+                    "roles": access.roles,
+                    "groups": access.groups,
+                    "permissions": access.permissions,
+                    "attributes": access.attributes,
+                    "access_level": access.access_level.value,
                 }
-                if ac:
-                    chunk_meta["departments"] = ac.departments
-                    chunk_meta["roles"] = ac.roles
-
-                self._vector_store.upsert(self._collection, chunk.chunk_id, emb, chunk_meta)
-                self._sparse_index.add(chunk.chunk_id, chunk.content, chunk_meta)
-
-        self._registry.update_status(doc.document_id, DocumentStatus.INDEXED, tenant_id=tenant_id)
-        return doc
+            )
+        return metadata

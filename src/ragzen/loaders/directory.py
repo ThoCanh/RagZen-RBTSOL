@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from ragzen.loaders.base import safe_resolve_path, validate_file
-from ragzen.loaders.text import TextLoader
+from ragzen.loaders.documents import UniversalDocumentLoader
 from ragzen.models import Document
 
 logger = logging.getLogger("ragzen.loaders.directory")
@@ -29,11 +29,11 @@ class DirectoryLoader:
         self._glob_pattern = glob_pattern
         self._max_size_mb = max_size_mb
         self._recursive = recursive
-        self._text_loader = TextLoader(max_size_mb=max_size_mb)
+        self._document_loader = UniversalDocumentLoader(max_size_mb=max_size_mb)
 
     def supported_mime_types(self) -> frozenset[str]:
         """Return all supported MIME types."""
-        return self._text_loader.supported_mime_types()
+        return self._document_loader.supported_mime_types()
 
     def load(self, source: str | Path) -> list[Document]:
         """Load all files from a directory.
@@ -60,9 +60,7 @@ class DirectoryLoader:
             try:
                 safe_resolve_path(file_path, base_dir)
             except ValueError:
-                logger.warning(
-                    "Skipping file outside base directory: %s", file_path
-                )
+                logger.warning("Skipping file outside base directory: %s", file_path)
                 continue
 
             # Try to load with text loader
@@ -71,7 +69,7 @@ class DirectoryLoader:
                     file_path,
                     max_size_mb=self._max_size_mb,
                 )
-                docs = self._text_loader.load(file_path)
+                docs = self._document_loader.load(file_path)
                 documents.extend(docs)
             except Exception:
                 logger.debug("Skipping unsupported file: %s", file_path)

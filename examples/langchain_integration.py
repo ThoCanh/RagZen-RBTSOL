@@ -27,8 +27,8 @@ class RagZenRetriever:
         )
         return [
             {
-                "page_content": res.chunk.content,
-                "metadata": res.chunk.metadata,
+                "page_content": res.content,
+                "metadata": res.metadata,
                 "score": str(res.score),
             }
             for res in results

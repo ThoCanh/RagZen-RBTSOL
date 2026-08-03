@@ -55,9 +55,7 @@ class FixedSizeChunker:
             chunk_text = text[start:end]
 
             if chunk_text.strip():
-                content_hash = hashlib.sha256(
-                    chunk_text.encode("utf-8")
-                ).hexdigest()
+                content_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
 
                 chunks.append(
                     Chunk(

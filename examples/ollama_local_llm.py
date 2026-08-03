@@ -20,7 +20,7 @@ def main() -> None:
         base_url="http://localhost:11434/v1",
         model="llama3:latest",
         api_key="ollama",
-        timeout=30.0,
+        timeout_seconds=30.0,
     )
 
     with tempfile.TemporaryDirectory() as tmp_dir:

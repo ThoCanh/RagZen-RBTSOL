@@ -7,9 +7,12 @@ verification, and atomic restore.
 from __future__ import annotations
 
 import gzip
+import json
 import logging
 import shutil
 import sqlite3
+import tempfile
+import zipfile
 from pathlib import Path
 
 from ragzen.exceptions import StorageError
@@ -116,3 +119,71 @@ class BackupManager:
             return self.restore(backup_path, verify=True)
         except Exception:
             return False
+
+
+class BundleBackupManager:
+    """Create and restore complete local RagZen storage bundles."""
+
+    def __init__(
+        self,
+        files: dict[str, str | Path],
+        *,
+        sqlite_names: set[str] | None = None,
+    ) -> None:
+        self.files = {name: Path(path) for name, path in files.items()}
+        self.sqlite_names = sqlite_names or set()
+
+    def backup(self, dest_path: str | Path, *, compress: bool = True) -> Path:
+        destination = Path(dest_path)
+        if destination.suffix != ".zip":
+            destination = Path(str(destination) + ".zip")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        compression = zipfile.ZIP_DEFLATED if compress else zipfile.ZIP_STORED
+        with tempfile.TemporaryDirectory(dir=destination.parent) as temp_dir:
+            staging = Path(temp_dir)
+            manifest: dict[str, str] = {}
+            for name, source in self.files.items():
+                if not source.exists():
+                    continue
+                staged = staging / name
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                if name in self.sqlite_names:
+                    BackupManager(source).backup(staged, compress=False)
+                else:
+                    shutil.copy2(source, staged)
+                manifest[name] = name
+            (staging / "manifest.json").write_text(
+                json.dumps({"version": 1, "files": manifest}), encoding="utf-8"
+            )
+            with zipfile.ZipFile(destination, "w", compression=compression) as archive:
+                for file_path in staging.rglob("*"):
+                    if file_path.is_file():
+                        archive.write(file_path, file_path.relative_to(staging).as_posix())
+        return destination
+
+    def restore(self, backup_path: str | Path) -> bool:
+        source = Path(backup_path)
+        if not source.exists():
+            raise StorageError(f"Backup file not found: {source}")
+        with tempfile.TemporaryDirectory(dir=source.parent) as temp_dir:
+            staging = Path(temp_dir)
+            with zipfile.ZipFile(source) as archive:
+                for member in archive.infolist():
+                    target = (staging / member.filename).resolve()
+                    if target != staging.resolve() and staging.resolve() not in target.parents:
+                        raise StorageError("Unsafe path in backup bundle")
+                    archive.extract(member, staging)
+            manifest_path = staging / "manifest.json"
+            if not manifest_path.exists():
+                raise StorageError("Invalid RagZen backup bundle: manifest.json missing")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for name in manifest.get("files", {}):
+                if name not in self.files:
+                    continue
+                staged = (staging / name).resolve()
+                if staging.resolve() not in staged.parents:
+                    raise StorageError("Unsafe path in backup bundle")
+                destination = self.files[name]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(staged, destination)
+        return True

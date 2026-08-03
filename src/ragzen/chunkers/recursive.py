@@ -17,13 +17,13 @@ logger = logging.getLogger("ragzen.chunkers.recursive")
 # Default separators ordered from most to least aggressive
 DEFAULT_SEPARATORS = [
     "\n\n",  # Paragraph
-    "\n",    # Line break
-    ". ",    # Sentence (with space)
-    "! ",    # Exclamation
-    "? ",    # Question
-    "; ",    # Semicolon
-    ", ",    # Comma
-    " ",     # Space (word boundary)
+    "\n",  # Line break
+    ". ",  # Sentence (with space)
+    "! ",  # Exclamation
+    "? ",  # Question
+    "; ",  # Semicolon
+    ", ",  # Comma
+    " ",  # Space (word boundary)
 ]
 
 # Vietnamese-friendly separators
@@ -84,9 +84,7 @@ class RecursiveChunker:
             start_offset = idx if idx >= 0 else current_offset
             end_offset = start_offset + len(chunk_text)
 
-            content_hash = hashlib.sha256(
-                chunk_text.encode("utf-8")
-            ).hexdigest()
+            content_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
 
             chunks.append(
                 Chunk(
@@ -105,9 +103,7 @@ class RecursiveChunker:
 
         return chunks
 
-    def _split_text(
-        self, text: str, separators: list[str]
-    ) -> list[str]:
+    def _split_text(self, text: str, separators: list[str]) -> list[str]:
         """Recursively split text using separator hierarchy."""
         if len(text) <= self._chunk_size:
             return [text] if text.strip() else []

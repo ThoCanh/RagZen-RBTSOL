@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +84,7 @@ class VectorStoreConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     provider: str = "memory"
+    path: str = ".ragzen/vectors.db"
     url: str = ""
     collection: str = "documents"
     timeout_seconds: float = Field(default=10.0, gt=0)
@@ -98,12 +100,23 @@ class SparseIndexConfig(BaseModel):
     path: str = ".ragzen/bm25"
 
 
+class GraphConfig(BaseModel):
+    """Lightweight knowledge-graph retrieval configuration."""
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = False
+    path: str = ".ragzen/graph.json"
+    max_hops: int = Field(default=2, ge=1, le=5)
+    min_entity_length: int = Field(default=3, ge=2, le=64)
+
+
 class RetrievalConfig(BaseModel):
     """Retrieval pipeline configuration."""
 
     model_config = ConfigDict(frozen=True)
 
-    mode: str = "hybrid"  # dense, sparse, hybrid
+    mode: str = "hybrid"  # dense, sparse, hybrid, graph, hybrid_graph
     top_k_dense: int = Field(default=30, ge=1)
     top_k_sparse: int = Field(default=30, ge=1)
     fusion: str = "rrf"  # rrf, weighted
@@ -113,7 +126,7 @@ class RetrievalConfig(BaseModel):
     @field_validator("mode")
     @classmethod
     def validate_mode(cls, v: str) -> str:
-        valid_modes = {"dense", "sparse", "hybrid"}
+        valid_modes = {"dense", "sparse", "hybrid", "graph", "hybrid_graph"}
         if v not in valid_modes:
             msg = f"Invalid retrieval mode: {v}. Must be one of: {valid_modes}"
             raise ValueError(msg)
@@ -170,6 +183,7 @@ class SecurityConfig(BaseModel):
     max_file_size_mb: float = Field(default=100.0, gt=0)
     max_page_count: int = Field(default=10000, ge=1)
     max_chunk_count: int = Field(default=100000, ge=1)
+    abac_keys: list[str] = Field(default_factory=list)
     allowed_mime_types: list[str] = Field(
         default_factory=lambda: [
             "text/plain",
@@ -236,7 +250,7 @@ class ChunkingConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    strategy: str = "recursive"  # fixed, recursive, semantic, parent_child
+    strategy: str = "recursive"  # fixed, recursive
     chunk_size: int = Field(default=512, ge=50, le=32768)
     chunk_overlap: int = Field(default=50, ge=0)
     token_based: bool = False
@@ -244,7 +258,7 @@ class ChunkingConfig(BaseModel):
     @field_validator("strategy")
     @classmethod
     def validate_strategy(cls, v: str) -> str:
-        valid = {"fixed", "recursive", "semantic", "parent_child"}
+        valid = {"fixed", "recursive"}
         if v not in valid:
             msg = f"Invalid chunking strategy: {v}. Must be one of: {valid}"
             raise ValueError(msg)
@@ -261,6 +275,20 @@ class ChunkingConfig(BaseModel):
         return self
 
 
+class ApiPrincipalConfig(BaseModel):
+    """Authenticated API principal and its server-side authorization claims."""
+
+    model_config = ConfigDict(frozen=True)
+
+    api_key: SecretStr
+    tenant_id: str
+    user_id: str
+    roles: list[str] = Field(default_factory=list)
+    departments: list[str] = Field(default_factory=list)
+    groups: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+
+
 class ServerConfig(BaseModel):
     """Server configuration."""
 
@@ -272,6 +300,8 @@ class ServerConfig(BaseModel):
     cors_origins: list[str] = Field(default_factory=list)
     request_size_limit_mb: float = Field(default=50.0, gt=0)
     request_timeout_seconds: float = Field(default=300.0, gt=0)
+    principals: list[ApiPrincipalConfig] = Field(default_factory=list)
+    allowed_ingest_roots: list[str] = Field(default_factory=list)
 
 
 # --- Main Config ---
@@ -300,6 +330,7 @@ class RagZenConfig(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     vector_store: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
     sparse_index: SparseIndexConfig = Field(default_factory=SparseIndexConfig)
+    graph: GraphConfig = Field(default_factory=GraphConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -342,6 +373,7 @@ class RagZenConfig(BaseModel):
             msg = f"Configuration file must contain a YAML mapping, got: {type(raw_data).__name__}"
             raise ConfigurationError(msg)
 
+        raw_data = _expand_env_placeholders(raw_data)
         # Apply environment variable overrides
         raw_data = _apply_env_overrides(raw_data)
 
@@ -364,8 +396,14 @@ class RagZenConfig(BaseModel):
         return cls(
             environment="development",
             storage=StorageConfig(path=f"{storage_path}/documents.db"),
-            vector_store=VectorStoreConfig(provider="memory"),
+            embedding=EmbeddingConfig(provider="local", model="deterministic-local-ngram"),
+            vector_store=VectorStoreConfig(
+                provider="sqlite",
+                path=f"{storage_path}/vectors.db",
+            ),
             sparse_index=SparseIndexConfig(path=f"{storage_path}/bm25"),
+            graph=GraphConfig(path=f"{storage_path}/graph.json"),
+            llm=LLMConfig(provider="extractive", model="ragzen-extractive"),
             security=SecurityConfig(
                 require_security_context=False,
                 fail_closed=False,
@@ -404,6 +442,27 @@ def _apply_env_overrides(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+_ENV_PLACEHOLDER = re.compile(r"^\$\{([A-Z][A-Z0-9_]*)\}$")
+
+
+def _expand_env_placeholders(value: Any) -> Any:
+    """Resolve exact `${VARIABLE}` YAML values without interpolating arbitrary text."""
+    if isinstance(value, dict):
+        return {key: _expand_env_placeholders(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_placeholders(item) for item in value]
+    if isinstance(value, str):
+        match = _ENV_PLACEHOLDER.fullmatch(value)
+        if match:
+            variable = match.group(1)
+            if variable not in os.environ:
+                raise ConfigurationError(
+                    f"Environment variable referenced by configuration is missing: {variable}"
+                )
+            return os.environ[variable]
+    return value
+
+
 def _set_nested(data: dict[str, Any], path: list[str], value: Any) -> None:
     """Set a value in a nested dict by path."""
     for key in path[:-1]:
@@ -437,8 +496,7 @@ def validate_config(config: RagZenConfig) -> list[str]:
             )
         if config.observability.log_query:
             warnings.append(
-                "PRIVACY: log_query is enabled in production. "
-                "User queries will be written to logs."
+                "PRIVACY: log_query is enabled in production. User queries will be written to logs."
             )
         if config.observability.log_answer:
             warnings.append(
@@ -450,11 +508,14 @@ def validate_config(config: RagZenConfig) -> list[str]:
                 "RELIABILITY: Using in-memory vector store in production. "
                 "Data will be lost on restart."
             )
+        if not config.server.principals:
+            warnings.append(
+                "SECURITY: No server principals configured; production server mode "
+                "will refuse to start."
+            )
         cors_origins = config.server.cors_origins
         if cors_origins and "*" in cors_origins:
-            warnings.append(
-                "SECURITY: CORS is set to allow all origins (*) in production."
-            )
+            warnings.append("SECURITY: CORS is set to allow all origins (*) in production.")
 
     # Chunking sanity checks
     if config.chunking.chunk_overlap >= config.chunking.chunk_size // 2:

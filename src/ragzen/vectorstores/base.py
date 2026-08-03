@@ -9,9 +9,7 @@ from typing import Any, Protocol, runtime_checkable
 class VectorStore(Protocol):
     """Protocol for vector store implementations."""
 
-    def create_collection(
-        self, name: str, *, dimensions: int = 0
-    ) -> None: ...
+    def create_collection(self, name: str, *, dimensions: int = 0) -> None: ...
 
     def collection_exists(self, name: str) -> bool: ...
 
@@ -37,3 +35,12 @@ class VectorStore(Protocol):
     def count(self, collection: str) -> int: ...
 
     def health(self) -> bool: ...
+
+    def clear(
+        self,
+        collection: str | None = None,
+        *,
+        filters: dict[str, Any] | None = None,
+    ) -> None: ...
+
+    def close(self) -> None: ...

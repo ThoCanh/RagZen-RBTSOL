@@ -14,16 +14,16 @@ class TestMigrationEngine:
 
         assert engine.current_version() == 0
         pending = engine.plan()
-        assert len(pending) == 2
+        assert len(pending) == 3
 
         # Apply migrations
         applied = engine.apply()
-        assert applied == 2
-        assert engine.current_version() == 2
+        assert applied == 3
+        assert engine.current_version() == 3
 
         # Status check
         st = engine.status()
-        assert st["current_version"] == 2
+        assert st["current_version"] == 3
         assert st["pending_count"] == 0
 
         # Idempotent apply

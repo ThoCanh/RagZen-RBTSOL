@@ -6,12 +6,16 @@ OpenAI-compatible API endpoint.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import threading
+from collections.abc import AsyncGenerator
 
 import httpx
 from tenacity import (
-    retry,
-    retry_if_exception_type,
+    Retrying,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
@@ -36,13 +40,21 @@ class OpenAICompatibleLLM:
         model: str = "llama3:latest",
         temperature: float = 0.1,
         max_tokens: int = 2048,
+        top_p: float = 1.0,
         timeout_seconds: float = 30.0,
+        max_retries: int = 1,
+        concurrency_limit: int = 10,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._top_p = top_p
+        self._timeout_seconds = timeout_seconds
+        self._max_retries = max_retries
+        self._sync_semaphore = threading.BoundedSemaphore(concurrency_limit)
+        self._async_semaphore = asyncio.Semaphore(concurrency_limit)
 
         headers = {}
         if api_key:
@@ -53,6 +65,7 @@ class OpenAICompatibleLLM:
             headers=headers,
             timeout=httpx.Timeout(timeout_seconds),
         )
+        self._headers = headers
 
     @property
     def model_name(self) -> str:
@@ -88,16 +101,10 @@ class OpenAICompatibleLLM:
 
         return self._call_api(
             messages,
-            temperature=temperature or self._temperature,
-            max_tokens=max_tokens or self._max_tokens,
+            temperature=self._temperature if temperature is None else temperature,
+            max_tokens=self._max_tokens if max_tokens is None else max_tokens,
         )
 
-    @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_exponential(multiplier=0.5, min=0.5, max=2.0),
-        retry=retry_if_exception_type(ProviderError),
-        reraise=True,
-    )
     def _call_api(
         self,
         messages: list[dict[str, str]],
@@ -105,7 +112,25 @@ class OpenAICompatibleLLM:
         temperature: float,
         max_tokens: int,
     ) -> str:
-        """Call the chat completions API with retry."""
+        """Call the chat completions API with configured retries."""
+        retrying = Retrying(
+            stop=stop_after_attempt(self._max_retries + 1),
+            wait=wait_exponential(multiplier=0.5, min=0.5, max=2.0),
+            retry=retry_if_exception(_is_retriable_error),
+            reraise=True,
+        )
+        for attempt in retrying:
+            with attempt, self._sync_semaphore:
+                return self._request(messages, temperature=temperature, max_tokens=max_tokens)
+        raise ProviderError("LLM retry loop ended unexpectedly", provider="openai_compatible")
+
+    def _request(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float,
+        max_tokens: int,
+    ) -> str:
         try:
             response = self._client.post(
                 "/chat/completions",
@@ -113,6 +138,7 @@ class OpenAICompatibleLLM:
                     "model": self._model,
                     "messages": messages,
                     "temperature": temperature,
+                    "top_p": self._top_p,
                     "max_tokens": max_tokens,
                     "stream": False,
                 },
@@ -131,6 +157,12 @@ class OpenAICompatibleLLM:
                 provider="openai_compatible",
                 retriable=e.response.status_code >= 500,
             ) from e
+        except httpx.TransportError as e:
+            raise ProviderError(
+                f"LLM transport error: {e}",
+                provider="openai_compatible",
+                retriable=True,
+            ) from e
         except Exception as e:
             raise ProviderError(
                 f"LLM generation failed: {e}",
@@ -145,6 +177,51 @@ class OpenAICompatibleLLM:
             return response.status_code == 200
         except Exception:
             return False
+
+    async def astream_generate(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str = "",
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Yield tokens from an OpenAI-compatible streaming response."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        async with (
+            self._async_semaphore,
+            httpx.AsyncClient(
+                base_url=self._base_url,
+                headers=self._headers,
+                timeout=httpx.Timeout(self._timeout_seconds),
+            ) as client,
+            client.stream(
+                "POST",
+                "/chat/completions",
+                json={
+                    "model": self._model,
+                    "messages": messages,
+                    "temperature": (self._temperature if temperature is None else temperature),
+                    "top_p": self._top_p,
+                    "max_tokens": self._max_tokens if max_tokens is None else max_tokens,
+                    "stream": True,
+                },
+            ) as response,
+        ):
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                data = json.loads(payload)
+                token = data.get("choices", [{}])[0].get("delta", {}).get("content")
+                if token:
+                    yield str(token)
 
     def close(self) -> None:
         """Close the HTTP client."""

@@ -15,10 +15,10 @@ Welcome to the official documentation for **RagZen** — an enterprise-grade, lo
 pip install ragzen
 ```
 
-Or for full web server & local embedding models support:
+For the server and local semantic embedding models:
 
 ```bash
-pip install "ragzen[server,embeddings]"
+pip install "ragzen[server,local]"
 ```
 
 ## Quick Example

@@ -11,12 +11,14 @@ class IngestRequest(BaseModel):
     path: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str = ""
+    security_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class IngestTextRequest(BaseModel):
     text: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str = ""
+    security_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class QueryApiRequest(BaseModel):

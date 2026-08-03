@@ -20,7 +20,8 @@ def main() -> None:
             doc_dir.mkdir(parents=True, exist_ok=True)
             doc_file = doc_dir / "quy_trinh.txt"
             doc_file.write_text(
-                "Quy trình xử lý sản phẩm lỗi bao gồm phân loại, ghi nhận biên bản và chuyển bộ phận tái chế.",
+                "Quy trình xử lý sản phẩm lỗi bao gồm phân loại, ghi nhận biên bản "
+                "và chuyển bộ phận tái chế.",
                 encoding="utf-8",
             )
 

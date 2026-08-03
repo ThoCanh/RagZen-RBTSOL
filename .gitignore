@@ -32,9 +32,11 @@ env/
 .ragzen/
 .coverage
 .pytest_cache/
+/.pytest_*/
 .mypy_cache/
 .ruff_cache/
 .benchmarks/
+site/
 
 # IDE & OS
 .DS_Store

@@ -28,6 +28,19 @@ class MigrationStep:
     python_handler: Callable[[sqlite3.Connection], None] | None = None
 
 
+def _add_column_if_missing(
+    conn: sqlite3.Connection, table: str, column: str, definition: str
+) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    _add_column_if_missing(conn, "documents", "content", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "document_versions", "content", "TEXT NOT NULL DEFAULT ''")
+
+
 # Registry of versioned migrations
 _MIGRATIONS: list[MigrationStep] = [
     MigrationStep(
@@ -44,6 +57,7 @@ _MIGRATIONS: list[MigrationStep] = [
             document_id TEXT PRIMARY KEY,
             version INTEGER NOT NULL DEFAULT 1,
             tenant_id TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
             content_hash TEXT NOT NULL DEFAULT '',
             metadata TEXT NOT NULL DEFAULT '{}',
             source TEXT NOT NULL DEFAULT '',
@@ -77,6 +91,7 @@ _MIGRATIONS: list[MigrationStep] = [
             document_id TEXT NOT NULL,
             version INTEGER NOT NULL,
             tenant_id TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
             content_hash TEXT NOT NULL,
             metadata TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL,
@@ -85,6 +100,14 @@ _MIGRATIONS: list[MigrationStep] = [
 
         CREATE INDEX IF NOT EXISTS idx_doc_versions ON document_versions(document_id, version);
         """,
+    ),
+    MigrationStep(
+        version=3,
+        name="persist_document_content",
+        up_sql="""
+        SELECT 1;
+        """,
+        python_handler=_migrate_v3,
     ),
 ]
 
@@ -131,7 +154,9 @@ class MigrationEngine:
             cur = conn.execute("PRAGMA table_info(schema_version)")
             cols = [row[1] for row in cur.fetchall()]
             if "name" not in cols:
-                conn.execute("ALTER TABLE schema_version ADD COLUMN name TEXT NOT NULL DEFAULT 'initial'")
+                conn.execute(
+                    "ALTER TABLE schema_version ADD COLUMN name TEXT NOT NULL DEFAULT 'initial'"
+                )
                 conn.commit()
         except sqlite3.Error:
             pass

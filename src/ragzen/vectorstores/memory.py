@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 from typing import Any
 
 logger = logging.getLogger("ragzen.vectorstores.memory")
@@ -22,9 +23,8 @@ class InMemoryVectorStore:
 
     def __init__(self) -> None:
         # collection_name -> {chunk_id -> (vector, chunk, metadata)}
-        self._collections: dict[
-            str, dict[str, tuple[list[float], dict[str, Any]]]
-        ] = {}
+        self._collections: dict[str, dict[str, tuple[list[float], dict[str, Any]]]] = {}
+        self._lock = threading.RLock()
 
     def create_collection(
         self,
@@ -33,13 +33,15 @@ class InMemoryVectorStore:
         dimensions: int = 0,
     ) -> None:
         """Create a new collection."""
-        if name not in self._collections:
-            self._collections[name] = {}
-            logger.debug("Created collection: %s", name)
+        with self._lock:
+            if name not in self._collections:
+                self._collections[name] = {}
+                logger.debug("Created collection: %s", name)
 
     def collection_exists(self, name: str) -> bool:
         """Check if a collection exists."""
-        return name in self._collections
+        with self._lock:
+            return name in self._collections
 
     def upsert(
         self,
@@ -49,9 +51,10 @@ class InMemoryVectorStore:
         metadata: dict[str, Any],
     ) -> None:
         """Insert or update a vector with metadata."""
-        if collection not in self._collections:
-            self.create_collection(collection)
-        self._collections[collection][chunk_id] = (vector, metadata)
+        with self._lock:
+            if collection not in self._collections:
+                self.create_collection(collection)
+            self._collections[collection][chunk_id] = (vector, metadata)
 
     def batch_upsert(
         self,
@@ -64,23 +67,23 @@ class InMemoryVectorStore:
 
     def delete(self, collection: str, chunk_id: str) -> bool:
         """Delete a vector by chunk_id."""
-        if collection in self._collections:
-            return self._collections[collection].pop(chunk_id, None) is not None
-        return False
+        with self._lock:
+            if collection in self._collections:
+                return self._collections[collection].pop(chunk_id, None) is not None
+            return False
 
-    def delete_by_filter(
-        self, collection: str, filters: dict[str, Any]
-    ) -> int:
+    def delete_by_filter(self, collection: str, filters: dict[str, Any]) -> int:
         """Delete vectors matching filter criteria."""
-        if collection not in self._collections:
-            return 0
-        to_delete = []
-        for cid, (_, meta) in self._collections[collection].items():
-            if self._matches_filters(meta, filters):
-                to_delete.append(cid)
-        for cid in to_delete:
-            del self._collections[collection][cid]
-        return len(to_delete)
+        with self._lock:
+            if collection not in self._collections:
+                return 0
+            to_delete = []
+            for cid, (_, meta) in self._collections[collection].items():
+                if self._matches_filters(meta, filters):
+                    to_delete.append(cid)
+            for cid in to_delete:
+                del self._collections[collection][cid]
+            return len(to_delete)
 
     def search(
         self,
@@ -101,12 +104,10 @@ class InMemoryVectorStore:
         Returns:
             List of (chunk_id, score, metadata) sorted by score desc.
         """
-        if collection not in self._collections:
-            return []
-
+        with self._lock:
+            items = list(self._collections.get(collection, {}).items())
         results: list[tuple[str, float, dict[str, Any]]] = []
-
-        for chunk_id, (vector, metadata) in self._collections[collection].items():
+        for chunk_id, (vector, metadata) in items:
             # Apply mandatory filters FIRST
             if filters and not self._matches_filters(metadata, filters):
                 continue
@@ -120,18 +121,31 @@ class InMemoryVectorStore:
 
     def count(self, collection: str) -> int:
         """Count vectors in a collection."""
-        return len(self._collections.get(collection, {}))
+        with self._lock:
+            return len(self._collections.get(collection, {}))
 
     def health(self) -> bool:
         """Always healthy for in-memory store."""
         return True
 
-    def clear(self, collection: str | None = None) -> None:
+    def clear(
+        self,
+        collection: str | None = None,
+        *,
+        filters: dict[str, Any] | None = None,
+    ) -> None:
         """Clear a collection or all collections."""
-        if collection:
-            self._collections.pop(collection, None)
-        else:
-            self._collections.clear()
+        if collection and filters:
+            self.delete_by_filter(collection, filters)
+            return
+        with self._lock:
+            if collection:
+                self._collections.pop(collection, None)
+            else:
+                self._collections.clear()
+
+    def close(self) -> None:
+        """Release resources (no-op for the in-memory backend)."""
 
     @staticmethod
     def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -146,9 +160,7 @@ class InMemoryVectorStore:
         return dot / (norm_a * norm_b)
 
     @staticmethod
-    def _matches_filters(
-        metadata: dict[str, Any], filters: dict[str, Any]
-    ) -> bool:
+    def _matches_filters(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
         """Check if metadata matches all filter criteria.
 
         Supports:
@@ -157,32 +169,6 @@ class InMemoryVectorStore:
         - Role matching (if document specifies roles)
         - Scalar/list filters
         """
-        for key, expected in filters.items():
-            if key == "_security_roles":
-                doc_roles = metadata.get("roles", [])
-                has_role = set(expected) & set(doc_roles) or "*" in expected or "admin" in expected
-                if doc_roles and isinstance(expected, list) and not has_role:
-                    return False
-                continue
+        from ragzen.security.filters import metadata_matches_filters
 
-            if key == "_security_groups":
-                doc_groups = metadata.get("groups", [])
-                has_group = set(expected) & set(doc_groups)
-                if doc_groups and isinstance(expected, list) and not has_group:
-                    return False
-                continue
-
-            actual = metadata.get(key)
-            if actual is None:
-                return False
-
-            if isinstance(expected, list):
-                if isinstance(actual, list):
-                    if not set(expected) & set(actual):
-                        return False
-                elif actual not in expected:
-                    return False
-            elif actual != expected:
-                return False
-
-        return True
+        return metadata_matches_filters(metadata, filters)

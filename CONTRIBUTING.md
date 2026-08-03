@@ -11,14 +11,18 @@ Thank you for contributing to RagZen!
    pip install -e ".[dev]"
    ```
 
-2. Run code formatting and linting:
+2. Run formatting, linting, type and security checks:
    ```bash
-   python -m ruff check src/
+   python -m ruff format --check src tests examples
+   python -m ruff check src tests
+   python -m mypy src
+   python -m bandit -r src -q
+   python -m pip_audit
    ```
 
 3. Run the test suite:
    ```bash
-   python -m pytest tests/ -v
+   python -m pytest --cov=ragzen --cov-branch --cov-report=term-missing
    ```
 
 4. Submitting Pull Requests:

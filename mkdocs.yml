@@ -3,6 +3,8 @@ site_description: Enterprise-Grade, Local-First, Multi-Tenant RAG Framework for 
 site_author: RagZen Contributors
 repo_url: https://github.com/ThoCanh/RagZen-RBTSOL
 repo_name: ThoCanh/RagZen-RBTSOL
+exclude_docs: |
+  announcements/
 theme:
   name: material
   palette:
@@ -16,10 +18,11 @@ theme:
 
 nav:
   - Overview: index.md
-  - Architecture: ARCHITECTURE.md
-  - Security & Threat Model: THREAT_MODEL.md
-  - Security Policy: SECURITY.md
-  - Contributing: CONTRIBUTING.md
+  - Architecture: architecture.md
+  - Configuration: configuration.md
+  - Providers: providers.md
+  - Security: security.md
+  - API: api.md
 
 markdown_extensions:
   - admonition
