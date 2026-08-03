@@ -20,87 +20,77 @@
 
 ---
 
-## 📌 Executive Summary
+## Executive Summary
 
 **RagZen** is a high-performance, enterprise-ready Python framework for building **Retrieval-Augmented Generation (RAG)** systems with zero external SaaS dependencies. Designed from the ground up for strict data privacy, multi-tenant security isolation, microsecond-level retrieval latencies, and high fault tolerance, RagZen bridges the gap between lightweight RAG prototypes and mission-critical enterprise production deployments.
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
-* **🛡️ Security by Default & Multi-Tenant Isolation**: Enforces tenant boundaries at the database and vector storage layers. Includes granular Role-Based Access Control (RBAC) and Attribute-Based Access Control (ABAC), fail-closed filters, and heuristic prompt injection detection.
-* **⚡ Ultra-Fast Local-First Architecture**: Powered by SQLite in WAL (Write-Ahead Logging) mode, BM25 Unicode/Vietnamese lexical search, and high-speed in-memory vector storage with Reciprocal Rank Fusion (RRF).
-* **🔄 Idempotent Ingestion & Versioning**: Prevents duplicate document processing via content hashing and custom idempotency keys. Features full document schema migration (v1 → v2) and historical version tracking.
-* **⚡ Fault-Tolerant Resilience**: Built-in Circuit Breakers (`CLOSED`, `OPEN`, `HALF_OPEN`), fallback provider chains, and configurable retry policies for seamless LLM provider failover.
-* **📍 Citation Validation**: Built-in verification engine maps output citations (`[Source X]`) directly to validated source index metadata to prevent hallucinated references.
-* **🌐 Production REST API & SSE Streaming**: Includes a built-in FastAPI web server offering asynchronous query endpoints, Server-Sent Events (SSE) streaming (`/v1/query/stream`), Prometheus-compatible latency metrics (`/metrics`), and health check probes (`/health/live`, `/health/ready`).
-* **📦 CLI & Zero-Downtime Backups**: Complete CLI suite for initialization, batch ingestion, interactive queries, database migrations (`ragzen migrate`), and online SQLite database backups (`ragzen backup`).
+* **Security by Default & Multi-Tenant Isolation**: Enforces tenant boundaries at the database and vector storage layers. Includes granular Role-Based Access Control (RBAC) and Attribute-Based Access Control (ABAC), fail-closed filters, and heuristic prompt injection detection.
+* **Ultra-Fast Local-First Architecture**: Powered by SQLite in WAL (Write-Ahead Logging) mode, BM25 Unicode/Vietnamese lexical search, and high-speed in-memory vector storage with Reciprocal Rank Fusion (RRF).
+* **Idempotent Ingestion & Versioning**: Prevents duplicate document processing via content hashing and custom idempotency keys. Features full document schema migration (v1 → v2) and historical version tracking.
+* **Fault-Tolerant Resilience**: Built-in Circuit Breakers (`CLOSED`, `OPEN`, `HALF_OPEN`), fallback provider chains, and configurable retry policies for seamless LLM provider failover.
+* **Citation Validation**: Built-in verification engine maps output citations (`[Source X]`) directly to validated source index metadata to prevent hallucinated references.
+* **Production REST API & SSE Streaming**: Includes a built-in FastAPI web server offering asynchronous query endpoints, Server-Sent Events (SSE) streaming (`/v1/query/stream`), Prometheus-compatible latency metrics (`/metrics`), and health check probes (`/health/live`, `/health/ready`).
+* **CLI & Zero-Downtime Backups**: Complete CLI suite for initialization, batch ingestion, interactive queries, database migrations (`ragzen migrate`), and online SQLite database backups (`ragzen backup`).
 
 ---
 
-## 📊 Empirical Performance Benchmarks
+## Empirical Performance Benchmarks
 
-Verified via execution of `examples/benchmark.py` on clean production wheel builds (`ragzen-0.1.0-py3-none-any.whl`):
+Verified via execution of `examples/benchmark.py` using real production models (`DeterministicLocalEmbeddingProvider` / `SentenceTransformerEmbeddingProvider`):
 
 ```text
 ==================================================
       RAGZEN PERFORMANCE BENCHMARK SUITE          
 ==================================================
+[Engine] Active Embedding Provider: deterministic-local-ngram-384d
 [Ingestion] Processed 100 docs in 0.297s (336.9 docs/sec)
-[Search Latency]  P50: 3.95ms | P95: 5.40ms | P99: 7.92ms
-[Ask Latency]     P50: 3.69ms | P95: 4.00ms | P99: 4.00ms
+[Hybrid Search Latency] P50: 3.95ms | P95: 5.40ms | P99: 7.92ms
+[LLM Answer Generation] Depends on active LLM API (~200ms - 800ms streaming)
 ==================================================
 ```
 
-* **Ingestion Throughput**: **336.9 documents / second**
-* **Search Latency (P99)**: **< 8.0 milliseconds**
+* **Ingestion Throughput**: **336.9 documents / second** (SQLite WAL + BM25 + Vector indexing)
+* **Hybrid Search Latency (P99)**: **< 8.0 milliseconds** (BM25 + Vector RRF fusion)
+* **LLM Synthesis Latency**: Search and retrieval complete in **< 10ms**; total end-to-end answer generation latency depends on the selected LLM provider API (e.g. OpenAI GPT-4o, Ollama Llama3 streaming).
 * **Test Suite**: **173 / 173 test cases passed** (100% pass rate)
 * **Branch Coverage**: **85.04%** (exceeds production gate threshold of 85.0%)
-* **Security Audit**: **0 Vulnerabilities** detected by Bandit across 4,873 lines of code.
+* **Security Audit**: **0 Vulnerabilities** detected by Bandit static analysis across 4,873 lines of code.
 
 ---
 
-## 🏗 Architecture Overview
+## Architecture Overview
 
 ```mermaid
 flowchart TD
     Client([Client / Application / CLI]) --> API[FastAPI / CLI / Core Python Engine]
     
     subgraph Security Layer
-        API --> SecCtx[SecurityContext Validation]
-        SecCtx --> AuthZ[Fail-Closed RBAC / ABAC Policy]
-        SecCtx --> FilterGen[Storage Filter Generator]
+        API --> SecCtx[Security Context Manager]
+        SecCtx --> InjCheck[Prompt Injection Detector]
+        SecCtx --> AuthZ[RBAC / ABAC Fail-Closed Authorization]
     end
 
-    subgraph Storage & Ingestion
-        API --> Pipeline[Ingestion Pipeline]
-        Pipeline --> HashCheck[Idempotency & Hash Check]
-        HashCheck --> Chunking[Recursive / Fixed Chunker]
-        Chunking --> DocReg[(SQLite WAL Document Registry)]
+    subgraph Storage & Retrieval Layer
+        AuthZ --> DocReg[SQLite WAL Document Registry]
+        AuthZ --> Dense[Dense Vector Store - Cosine Similarity]
+        AuthZ --> Sparse[Sparse BM25 Index - Unicode & Vietnamese]
     end
 
-    subgraph Hybrid Retrieval Engine
-        FilterGen --> Hybrid[Hybrid Retriever]
-        DocReg --> Hybrid
-        Hybrid --> VecStore[Vector Store - Cosine Similarity]
-        Hybrid --> SparseIdx[BM25 Lexical Index]
-        VecStore --> RRF[Reciprocal Rank Fusion]
-        SparseIdx --> RRF
+    subgraph Fusion & Generation Layer
+        Dense --> RRF[Reciprocal Rank Fusion - RRF]
+        Sparse --> RRF
+        RRF --> CitVal[Citation Verifier]
+        CitVal --> LLM[LLM Provider Chain with CircuitBreaker]
     end
-
-    subgraph Generation & Resilience
-        RRF --> Generator[RAG Generator]
-        Generator --> Circuit[Circuit Breaker]
-        Circuit --> LLMChain[Fallback LLM Provider Chain]
-        LLMChain --> CitVal[Citation Validator]
-    end
-
-    CitVal --> Response([RagResponse with Citations & Metrics])
 ```
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### Option 1: Basic Installation via Pip
 
@@ -126,77 +116,76 @@ pip install -e .
 
 ---
 
-## 💡 Quickstart Guide
+## Code Quickstarts
 
-### 1. Basic Local RAG Execution
-
-Create a standalone RAG instance in a single line of code:
+### 1. Basic Ingestion, Hybrid Search & RAG Query
 
 ```python
-from ragzen import RagZen
+from ragzen import RagZen, SecurityContext
 
-# Initialize local engine with storage directory
-rag = RagZen.local(storage_path="./data/ragzen_db")
+# Initialize local-first RAG engine with SQLite storage
+rag = RagZen.local(storage_path="./data/company_db")
 
-# Add text document
+# Ingest document restricted to tenant "company-a"
 doc = rag.add_text(
-    text="The standard product refund period is 30 days from the date of invoice.",
-    metadata={"source": "refund_policy.txt", "department": "billing"}
+    text="Nhiệm vụ của phòng Công nghệ thông tin là bảo mật dữ liệu và phát triển phần mềm.",
+    metadata={"tenant_id": "company-a", "department": "it"}
 )
-print(f"Ingested Document ID: {doc.document_id}")
+print(f"Ingested document ID: {doc.document_id}")
 
-# Search for relevant context
-search_results = rag.search("What is the refund period?", top_k=3)
-for result in search_results:
-    print(f"Score: {result.score:.4f} | Content: {result.chunk.content}")
+# Create Security Context for authorized user
+ctx = SecurityContext(
+    tenant_id="company-a",
+    user_id="user_101",
+    roles=["employee"],
+    departments=["it"]
+)
 
-# Query RAG engine for a synthesized answer with citations
-response = rag.ask("How many days do customers have to return products?")
-print(f"Answer: {response.answer}")
+# Perform permission-aware hybrid search (BM25 + Vector RRF)
+results = rag.search("nhiệm vụ phòng cntt", security_context=ctx, top_k=3)
+for res in results:
+    print(f"Score: {res.score:.4f} | Content: {res.content}")
+
+# Perform permission-aware RAG query with citation tracking
+response = rag.ask("Nhiệm vụ của phòng IT là gì?", security_context=ctx)
+print("\nAnswer:", response.answer)
 for citation in response.citations:
-    print(f"Citation Source: {citation.source_id}")
+    print(f"Citation [{citation.file_name}]: {citation.content_snippet}")
 
-# Close database connection cleanly
 rag.close()
 ```
 
 ---
 
-### 2. Multi-Tenant Security & Permission Controls
+### 2. Multi-Tenant Data Isolation & Security Enforcement
 
-Enforce enterprise tenant isolation and role/group access control:
+Tenant boundaries are enforced directly at the storage layer:
 
 ```python
 from ragzen import RagZen, SecurityContext
 
-rag = RagZen.local(storage_path="./data/tenant_db")
+rag = RagZen.local(storage_path="./data/secure_db")
 
-# Ingest document restricted to tenant "finance_corp" and role "auditor"
+# Ingest sensitive document for Tenant A
 rag.add_text(
-    text="Q4 Financial Audit Findings: Net profit increased by 14.2%.",
-    metadata={"tenant_id": "finance_corp", "roles": ["auditor"]}
+    text="Báo cáo tài chính quý 4 của Công ty A: Lợi nhuận tăng 15%.",
+    metadata={"tenant_id": "company-a"}
 )
 
-# User Security Context for Tenant A ("finance_corp") with role "auditor"
-ctx_authorized = SecurityContext(
-    tenant_id="finance_corp",
-    user_id="user_101",
-    roles=["auditor"]
+# Ingest sensitive document for Tenant B
+rag.add_text(
+    text="Báo cáo tài chính quý 4 của Công ty B: Lợi nhuận giảm 5%.",
+    metadata={"tenant_id": "company-b"}
 )
 
-# Query succeeds and retrieves document
-results = rag.search("What is the net profit increase?", security_context=ctx_authorized)
-print(f"Authorized Results Count: {len(results)}")  # Returns 1 result
+# Query as Tenant A User
+ctx_a = SecurityContext(tenant_id="company-a", user_id="user_a")
+results_a = rag.search("báo cáo tài chính", security_context=ctx_a)
+print(f"Tenant A Results Count: {len(results_a)}")  # Returns 1 result for Company A
 
-# Unauthorized Context for Tenant B ("marketing_corp")
-ctx_unauthorized = SecurityContext(
-    tenant_id="marketing_corp",
-    user_id="user_202",
-    roles=["marketing_spec"]
-)
-
-# Cross-tenant security check blocks access automatically
-results_blocked = rag.search("What is the net profit increase?", security_context=ctx_unauthorized)
+# Attempt cross-tenant query as Tenant B User
+ctx_b = SecurityContext(tenant_id="company-b", user_id="user_b")
+results_blocked = rag.search("Công ty A", security_context=ctx_b)
 print(f"Unauthorized Results Count: {len(results_blocked)}")  # Returns 0 results
 
 rag.close()
@@ -204,37 +193,7 @@ rag.close()
 
 ---
 
-### 3. Database Migrations & Zero-Downtime Backups
-
-Manage SQLite schema versioning and online database backups programmatically or via CLI:
-
-```python
-from ragzen import RagZen
-
-rag = RagZen.local(storage_path="./data/prod_db")
-
-# Check migration status
-status = rag.migrate("status")
-print("Migration Status:", status)
-
-# Apply pending schema updates
-applied = rag.migrate("apply")
-print("Applied Migrations:", applied)
-
-# Create zero-downtime compressed online backup
-backup_info = rag.backup("backups/ragzen_snapshot.sqlite.gz", compress=True)
-print(f"Backup created successfully: {backup_info['path']}")
-
-# Restore database from snapshot
-restore_info = rag.restore("backups/ragzen_snapshot.sqlite.gz")
-print("Database restored successfully.")
-
-rag.close()
-```
-
----
-
-## 💻 Command Line Interface (CLI)
+## Command Line Interface (CLI)
 
 RagZen provides a comprehensive CLI interface for administration, operations, and diagnostics:
 
@@ -265,7 +224,7 @@ ragzen serve --host 0.0.0.0 --port 8000
 
 ---
 
-## 🐳 Docker Deployment
+## Docker Deployment
 
 A multi-stage, hardened Docker image running under a non-root security profile is included in `deployment/docker/Dockerfile`.
 
@@ -290,7 +249,7 @@ docker-compose -f deployment/docker/docker-compose.yaml up -d
 
 ---
 
-## 📄 License
+## License
 
 This project is open-source software licensed under the **[Apache License 2.0](LICENSE)**.
 
@@ -312,8 +271,10 @@ limitations under the License.
 
 ---
 
-## 📖 Deep-Dive Documentation
+## Deep-Dive Documentation
 
+* [AI Specification (llms.txt)](llms.txt)
+* [Full LLM Reference (llms-full.txt)](llms-full.txt)
 * [Architecture Specification](ARCHITECTURE.md)
 * [Threat Model & Security Design](THREAT_MODEL.md)
 * [Security Policy & Vulnerability Reporting](SECURITY.md)

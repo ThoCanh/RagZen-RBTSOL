@@ -21,35 +21,30 @@ from ragzen.exceptions import ProviderError, ProviderTimeoutError
 logger = logging.getLogger("ragzen.llms.openai_compatible")
 
 
+def _is_retriable_error(exc: BaseException) -> bool:
+    return isinstance(exc, ProviderError) and getattr(exc, "retriable", False)
+
+
 class OpenAICompatibleLLM:
-    """LLM provider for OpenAI-compatible APIs.
-
-    Supports vLLM, llama.cpp, Ollama (/v1), and OpenAI.
-    Includes retry with exponential backoff and timeout.
-
-    Never logs API keys or Authorization headers.
-    """
+    """LLM provider for OpenAI-compatible endpoints (Ollama, vLLM, OpenAI)."""
 
     def __init__(
         self,
         *,
         base_url: str = "http://localhost:11434/v1",
         api_key: str = "",
-        model: str = "qwen2.5",
+        model: str = "llama3:latest",
         temperature: float = 0.1,
         max_tokens: int = 2048,
-        timeout_seconds: float = 120.0,
-        max_retries: int = 3,
+        timeout_seconds: float = 30.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
-        self._timeout = timeout_seconds
-        self._max_retries = max_retries
 
-        headers: dict[str, str] = {"Content-Type": "application/json"}
+        headers = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
@@ -61,7 +56,6 @@ class OpenAICompatibleLLM:
 
     @property
     def model_name(self) -> str:
-        """Return the model name."""
         return self._model
 
     def generate(
@@ -99,8 +93,8 @@ class OpenAICompatibleLLM:
         )
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=30),
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=2.0),
         retry=retry_if_exception_type(ProviderError),
         reraise=True,
     )
@@ -141,6 +135,7 @@ class OpenAICompatibleLLM:
             raise ProviderError(
                 f"LLM generation failed: {e}",
                 provider="openai_compatible",
+                retriable=False,
             ) from e
 
     def health_check(self) -> bool:

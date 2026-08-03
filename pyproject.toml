@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragzen"
-version = "0.1.1"
+version = "0.1.2"
 description = "Enterprise-grade, local-first RAG for Python"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -108,8 +108,6 @@ all = [
 [project.scripts]
 ragzen = "ragzen.cli.main:app"
 
-[project.entry-points."ragzen.plugins"]
-
 [project.urls]
 Homepage = "https://github.com/ThoCanh/RagZen-RBTSOL"
 Documentation = "https://github.com/ThoCanh/RagZen-RBTSOL#readme"
@@ -117,11 +115,9 @@ Repository = "https://github.com/ThoCanh/RagZen-RBTSOL"
 Issues = "https://github.com/ThoCanh/RagZen-RBTSOL/issues"
 Changelog = "https://github.com/ThoCanh/RagZen-RBTSOL/blob/main/CHANGELOG.md"
 
-[tool.hatch.build.targets.sdist]
-include = ["/src/ragzen"]
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/ragzen"]
+
+
 
 [tool.ruff]
 target-version = "py311"

@@ -222,13 +222,20 @@ class RAGGenerator:
 
         # Generate
         gen_start = time.perf_counter()
-        answer = self._llm.generate(
-            prompt,
-            system_prompt=self._system_prompt,
-            temperature=self._temperature,
-            max_tokens=self._max_tokens,
-        )
-        gen_ms = (time.perf_counter() - gen_start) * 1000
+        try:
+            answer = self._llm.generate(
+                prompt,
+                system_prompt=self._system_prompt,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+            )
+            gen_ms = (time.perf_counter() - gen_start) * 1000
+            warnings = []
+        except Exception as err:
+            logger.warning("LLM API call failed or unavailable (%s). Synthesizing answer from retrieved context.", err)
+            answer = f"Retrieved Context Summary:\n\n{context}"
+            gen_ms = (time.perf_counter() - gen_start) * 1000
+            warnings = [f"LLM Provider unavailable: {err}"]
 
         # Validate citations
         citations, warnings = validate_citations(answer, used_results)

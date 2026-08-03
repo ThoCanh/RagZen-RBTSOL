@@ -17,10 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from ragzen.config import RagZenConfig
-from ragzen.embeddings.mock import MockEmbeddingProvider
 from ragzen.generation.generator import RAGGenerator
 from ragzen.ingestion.pipeline import IngestionPipeline
-from ragzen.llms.mock import MockLLMProvider
 from ragzen.llms.openai_compatible import OpenAICompatibleLLM
 from ragzen.models import (
     Document,
@@ -67,8 +65,20 @@ class RagZen:
         storage_path = Path(self.config.storage.path)
         self.registry = document_registry or DocumentRegistry(storage_path)
 
-        # Initialize embedding provider
-        self.embedding = embedding or MockEmbeddingProvider()
+        # Initialize embedding provider (Default: SentenceTransformer if installed -> DeterministicLocal)
+        if embedding:
+            self.embedding = embedding
+        else:
+            from ragzen.embeddings.sentence_transformer import (
+                SentenceTransformerEmbeddingProvider,
+            )
+
+            if SentenceTransformerEmbeddingProvider.is_available():
+                self.embedding = SentenceTransformerEmbeddingProvider()
+            else:
+                from ragzen.embeddings.local import DeterministicLocalEmbeddingProvider
+
+                self.embedding = DeterministicLocalEmbeddingProvider()
 
         # Initialize vector store & sparse index
         self.vector_store = vector_store or InMemoryVectorStore()
@@ -83,22 +93,25 @@ class RagZen:
             top_k_sparse=self.config.retrieval.top_k_sparse,
         )
 
-        # Initialize LLM provider with fallback chain
+        # Initialize LLM provider
         if llm:
             self.llm = llm
         else:
-            api_key = self.config.llm.api_key.get_secret_value() if self.config.llm.api_key else ""
-            primary_llm = OpenAICompatibleLLM(
+            import os
+
+            api_key = (
+                self.config.llm.api_key.get_secret_value()
+                if self.config.llm.api_key
+                else os.getenv("OPENAI_API_KEY", "")
+            )
+            self.llm = OpenAICompatibleLLM(
                 base_url=self.config.llm.base_url,
                 api_key=api_key,
                 model=self.config.llm.model,
                 temperature=self.config.llm.temperature,
                 max_tokens=self.config.llm.max_tokens,
-                timeout_seconds=2.0,
+                timeout_seconds=5.0,
             )
-            fallback_llm = MockLLMProvider()
-            from ragzen.llms.fallback import FallbackLLMProvider
-            self.llm = FallbackLLMProvider([primary_llm, fallback_llm])
 
         # Initialize ingestion pipeline & generator
         self.ingestion = IngestionPipeline(
@@ -422,9 +435,10 @@ class RagZen:
             ProviderStatus(name="llm_provider", healthy=llm_healthy),
         ]
 
-        all_healthy = all(p.healthy for p in providers)
+        # Core local RAG engine components (registry, vector store, embedding) determine core engine health
+        core_healthy = db_healthy and vs_healthy and emb_healthy
         return HealthStatus(
-            healthy=all_healthy,
+            healthy=core_healthy,
             version="0.1.0",
             providers=providers,
             document_count=self.registry.count(),
