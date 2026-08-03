@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="asset/ragzen.png" alt="RagZen Logo" width="600"/>
+  <img src="https://raw.githubusercontent.com/ThoCanh/RagZen-RBTSOL/main/assets/ragzen.png" alt="RagZen Logo" width="600"/>
 </p>
 
 <h1 align="center">RagZen</h1>
