@@ -1,0 +1,62 @@
+# RagZen
+
+> Enterprise-Grade, Local-First, Multi-Tenant RAG Framework for Python.
+
+RagZen is a high-performance Python framework for building Retrieval-Augmented Generation (RAG) applications with strict multi-tenant isolation, granular RBAC/ABAC authorization, microsecond-level hybrid search, and fault-tolerant resilience.
+
+- Project Homepage: https://github.com/ThoCanh/RagZen-RBTSOL
+- PyPI Package: https://pypi.org/project/ragzen/
+- License: Apache 2.0
+
+## Core Capabilities
+
+- **Multi-Tenant Security**: Storage-level tenant isolation, RBAC/ABAC access control, prompt injection detection, PII detection, and secret redactor.
+- **Local-First Architecture**: Built-in SQLite WAL document registry, BM25 sparse search with Vietnamese/Unicode support, and in-memory cosine vector store with Reciprocal Rank Fusion (RRF).
+- **Fault-Tolerant Resilience**: CircuitBreaker state machine (CLOSED, OPEN, HALF_OPEN), FallbackLLMProvider chain, and configurable retry backoff.
+- **Citation Validation**: Built-in citation verifier mapping [Source X] to source document metadata.
+- **Web API & Streaming**: FastAPI REST endpoints, SSE streaming (/v1/query/stream), Prometheus telemetry (/metrics), and health probes.
+- **CLI & Database Tools**: CLI suite for ingestion, query, schema migrations (ragzen migrate), and zero-downtime compressed backups (ragzen backup).
+
+## Quick API Reference
+
+```python
+from ragzen import RagZen, SecurityContext
+
+# 1. Initialize local engine
+rag = RagZen.local(storage_path="./data/ragzen_db")
+
+# 2. Add text document
+doc = rag.add_text(
+    text="Product refund period is 30 days.",
+    metadata={"tenant_id": "company-a", "roles": ["support"]}
+)
+
+# 3. Security context for authorized user
+ctx = SecurityContext(
+    tenant_id="company-a",
+    user_id="user_101",
+    roles=["support"]
+)
+
+# 4. Perform hybrid search
+results = rag.search("What is the refund period?", security_context=ctx, top_k=3)
+
+# 5. Perform RAG query with citation tracking
+response = rag.ask("How many days for refund?", security_context=ctx)
+print(response.answer)
+for c in response.citations:
+    print(c.source_id)
+
+# 6. Database backup and restore
+rag.backup("snapshot.sqlite.gz", compress=True)
+rag.restore("snapshot.sqlite.gz")
+
+# 7. Close engine
+rag.close()
+```
+
+## Secondary Resources
+
+- [Architecture Specification](https://github.com/ThoCanh/RagZen-RBTSOL/blob/main/ARCHITECTURE.md): Deep-dive into storage layout, hybrid search fusion, and security filters.
+- [Threat Model & Security](https://github.com/ThoCanh/RagZen-RBTSOL/blob/main/THREAT_MODEL.md): Security boundaries, threat mitigations, and prompt injection defense.
+- [Full LLMs Specification](https://github.com/ThoCanh/RagZen-RBTSOL/blob/main/llms-full.txt): Complete API index and comprehensive code reference for AI agents.

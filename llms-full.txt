@@ -1,0 +1,91 @@
+# RagZen Full API & Architectural Specification for LLMs and AI Agents
+
+Project: RagZen (Enterprise-Grade Local-First Multi-Tenant RAG)
+Version: 0.1.1
+License: Apache 2.0
+Repository: https://github.com/ThoCanh/RagZen-RBTSOL
+PyPI: https://pypi.org/project/ragzen/
+
+---
+
+## 1. Class: `ragzen.engine.RagZen`
+
+Primary facade orchestrating document ingestion, hybrid search, RAG generation, database migrations, backups, and metrics.
+
+### Methods:
+- `RagZen.local(storage_path: str = ".ragzen", config_path: str | None = None) -> RagZen`: Creates a local engine instance backed by SQLite WAL database.
+- `RagZen.from_config(config_path: str) -> RagZen`: Loads configuration from YAML or environment.
+- `RagZen.from_components(...) -> RagZen`: Initializes custom document registry, vector store, sparse index, LLM provider, and embedding provider.
+- `add_text(text: str, metadata: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Document`: Ingests raw text string, extracts chunks, generates embeddings, and indexes in SQLite + Vector Store + BM25.
+- `add(document: Document) -> Document`: Ingests pre-constructed `Document` object.
+- `update(document_id: str, new_text: str, metadata: dict[str, Any] | None = None) -> bool`: Updates document content and propagates updates across vector and sparse indexes.
+- `delete(document_id: str, tenant_id: str | None = None) -> bool`: Deletes document by ID and purges associated chunks across all storage backends.
+- `search(query: str, top_k: int = 5, filters: dict[str, Any] | None = None, security_context: SecurityContext | None = None) -> list[SearchResult]`: Executes hybrid search (BM25 + Vector Cosine Similarity) using Reciprocal Rank Fusion (RRF).
+- `asearch(...) -> list[SearchResult]`: Asynchronous variant of `search()`.
+- `ask(query: str, top_k: int = 5, filters: dict[str, Any] | None = None, security_context: SecurityContext | None = None) -> RagResponse`: Executes hybrid search and synthesizes an answer with validated citations via the configured LLM provider chain.
+- `aask(...) -> RagResponse`: Asynchronous variant of `ask()`.
+- `stream(query: str, top_k: int = 5, security_context: SecurityContext | None = None) -> Iterator[str]`: Streams answer tokens in real-time.
+- `backup(dest_path: str, compress: bool = True) -> dict[str, Any]`: Creates an online SQLite database snapshot.
+- `restore(source_path: str) -> dict[str, Any]`: Restores database from a snapshot.
+- `migrate(action: str = "status") -> dict[str, Any]`: Executes schema migrations (`plan`, `apply`, `status`).
+- `health() -> HealthStatus`: Returns component health status dictionary.
+- `stats() -> dict[str, Any]`: Returns telemetry counters and P50/P95/P99 latency histograms.
+- `close() -> None`: Flushes buffers and closes SQLite connection.
+
+---
+
+## 2. Class: `ragzen.models.SecurityContext`
+
+Immutable model encapsulating user identity and security permissions for multi-tenant isolation.
+
+```python
+class SecurityContext(BaseModel):
+    tenant_id: str
+    user_id: str
+    roles: list[str] = Field(default_factory=list)
+    groups: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+```
+
+---
+
+## 3. Class: `ragzen.resilience.circuit_breaker.CircuitBreaker`
+
+Fault-tolerance state machine wrapping external LLM and embedding provider API calls.
+
+- States: `CLOSED` (Normal operation), `OPEN` (Failures exceeded threshold; calls fail fast), `HALF_OPEN` (Probe state after recovery timeout).
+- Parameters: `failure_threshold: int = 5`, `recovery_timeout: float = 30.0`.
+
+---
+
+## 4. Integration Examples
+
+### LangChain Integration Example
+```python
+from langchain.schema import BaseRetriever, Document as LCDocument
+from ragzen import RagZen, SecurityContext
+
+class RagZenLangChainRetriever(BaseRetriever):
+    rag: RagZen
+    security_context: SecurityContext
+
+    def _get_relevant_documents(self, query: str) -> list[LCDocument]:
+        results = self.rag.search(query, security_context=self.security_context)
+        return [LCDocument(page_content=r.chunk.content, metadata=r.chunk.metadata) for r in results]
+```
+
+### Ollama Local LLM Integration Example
+```python
+from ragzen import RagZen
+from ragzen.llms.openai_compatible import OpenAICompatibleLLM
+
+# Connect RagZen to Ollama running locally at http://localhost:11434/v1
+ollama_llm = OpenAICompatibleLLM(
+    base_url="http://localhost:11434/v1",
+    model="llama3:latest",
+    api_key="ollama"
+)
+rag = RagZen.from_components(llm=ollama_llm)
+response = rag.ask("Summarize company policy")
+```

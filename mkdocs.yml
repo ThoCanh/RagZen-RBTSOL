@@ -1,0 +1,30 @@
+site_name: RagZen Documentation
+site_description: Enterprise-Grade, Local-First, Multi-Tenant RAG Framework for Python
+site_author: RagZen Contributors
+repo_url: https://github.com/ThoCanh/RagZen-RBTSOL
+repo_name: ThoCanh/RagZen-RBTSOL
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: indigo
+    accent: blue
+  features:
+    - navigation.expand
+    - navigation.indexes
+    - content.code.copy
+
+nav:
+  - Overview: index.md
+  - Architecture: ARCHITECTURE.md
+  - Security & Threat Model: THREAT_MODEL.md
+  - Security Policy: SECURITY.md
+  - Contributing: CONTRIBUTING.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
