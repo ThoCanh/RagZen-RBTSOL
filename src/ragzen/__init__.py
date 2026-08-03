@@ -38,7 +38,7 @@ from ragzen.models import (
     SecurityContext,
 )
 
-__version__ = "0.2.0"
+__version__ = "2.3.8"
 
 __all__ = [
     "AccessControl",

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragzen"
-version = "0.2.0"
+version = "2.3.8"
 description = "Enterprise-grade, local-first RAG for Python"
 readme = "README.md"
 requires-python = ">=3.11"
